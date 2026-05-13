@@ -23,6 +23,8 @@ const allowedOrigins = [
   process.env.FRONTEND_ORIGIN,
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'https://iot-smarthome-security.vercel.app', // Cấp thẻ VIP cho Vercel chính thức
+  'https://iot-smarthome-security-git-main-mytuyen-s-projects.vercel.app' // Cấp thẻ VIP cho Vercel nháp
 ].filter(Boolean);
 
 app.use(
