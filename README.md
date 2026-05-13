@@ -122,6 +122,26 @@ For the React app, create `frontend/.env` only if you want to override the defau
 ```env
 VITE_API_BASE_URL=http://127.0.0.1:5000/api
 ```
+## 🚀 Deployment & Live Demo
+
+The system is fully deployed on high-availability cloud infrastructures:
+
+- **Frontend Dashboard (React + Vite):** `https://iot-smarthome-security.vercel.app` 
+  *(Note: Replace with your actual Vercel URL)*
+- **Security Backend API (Node.js/Express):** `https://iot-smarthome-security.onrender.com`
+- **Database Layer:** MongoDB Atlas (Cloud Cluster)
+
+### ⚙️ Environment Configuration (Production)
+
+The following environment variables are configured for secure cross-origin communication:
+
+#### Backend (Render)
+- `MONGODB_URI`: Secure connection string to the MongoDB Atlas cluster.
+- `FRONTEND_ORIGIN`: Restricted to the production Vercel URL to enforce strict CORS policies.
+- `JWT_SECRET`: High-entropy key for stateless user authentication.
+
+#### Frontend (Vercel)
+- `VITE_API_BASE_URL`: Mapped to the production Render endpoint for API orchestration.
 
 ### Run the Current Web App from Scratch
 
@@ -206,6 +226,6 @@ iot-smarthome-security/
 
 ## Notes on Current State
 
-- The React app is currently aligned to the Flask backend on port `5000`.
+- The React app is now integrated with the Node.js Security API for production authentication and data management, while retaining local compatibility with the Flask runtime.
 - The Node.js security API is present and more security-focused, but it is a parallel backend track rather than the one the current frontend is fully wired to.
 - MQTTS/TLS is implemented in the Python MQTT service for HiveMQ Cloud, while some frontend mock/demo code still references public broker simulation paths for UI development.
