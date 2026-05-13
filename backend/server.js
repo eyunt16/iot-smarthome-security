@@ -43,7 +43,7 @@ app.use(
 
       callback(new Error(`CORS blocked for origin: ${origin}`));
     },
-    credentials: false,
+    credentials: true,
   }),
 );
 
