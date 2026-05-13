@@ -130,7 +130,7 @@ This is the path that matches the current React dashboard integration in the wor
 #### 1. Start the Flask backend
 
 ```powershell
-cd IOT\backend
+cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -144,7 +144,7 @@ The Flask backend runs on `http://127.0.0.1:5000`.
 Open a second terminal:
 
 ```powershell
-cd IOT\frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -158,7 +158,7 @@ Use this if you want to test the JWT/RBAC/brute-force/MongoDB backend separately
 #### Option A: local MongoDB
 
 ```powershell
-cd IOT\backend
+cd backend
 npm install
 npm run seed:superadmin
 npm start
@@ -167,20 +167,20 @@ npm start
 #### Option B: Docker Compose
 
 ```powershell
-cd IOT\backend
+cd backend
 docker compose up --build
 ```
 
 ### Optional Helper Scripts
 
-- Full startup check: `IOT\scripts\SETUP_AND_RUN.ps1`
-- One-click Windows launcher: `IOT\scripts\RUN_ALL.bat`
-- Backend-only helper: `IOT\backend\start_backend.ps1`
+- Full startup check: `scripts\SETUP_AND_RUN.ps1`
+- One-click Windows launcher: `scripts\RUN_ALL.bat`
+- Backend-only helper: `backend\start_backend.ps1`
 
 ## Project Structure
 
 ```text
-IOT/
+iot-smarthome-security/
 |-- backend/                # Flask runtime, SQLite data layer, Node security API, Docker config
 |   |-- app.py              # Flask entry point
 |   |-- server.js           # Express/JWT/Mongo security API entry point
