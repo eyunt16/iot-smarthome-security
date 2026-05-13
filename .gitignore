@@ -1,0 +1,18 @@
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Env & Secrets
+.env
+database.db
+iot_smart_home.db
+
+# OS Files
+.DS_Store
+Thumbs.db

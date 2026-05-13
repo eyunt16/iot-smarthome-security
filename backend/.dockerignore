@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+.venv
+venv
+__pycache__
+database.db
+data
+*.pyc
+*.pyo
+*.swp
+.git
+.gitignore

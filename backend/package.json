@@ -1,0 +1,25 @@
+{
+  "name": "iot-smart-home-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure Node.js/Express backend for the IoT Smart Home platform.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed:superadmin": "node scripts/seedSuperAdmin.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.3",
+    "nodemailer": "^7.0.10"
+  }
+}

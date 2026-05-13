@@ -1,0 +1,166 @@
+@baseUrl = http://localhost:5000
+@apiUrl = {{baseUrl}}/api
+@contentType = application/json
+
+# Update these values to match a real MongoDB user before testing.
+@usernameOrEmail = admin@example.com
+@password = your-password
+@wrongPassword = wrong-password
+@targetUserId = paste-locked-user-id-here
+
+# Email Alert Notes:
+# 1. Configure SMTP_* and ADMIN_EMAIL in backend/.env before testing alerts.
+# 2. A high-priority email should be sent when an account becomes locked.
+# 3. A high-priority email should also be sent for RBAC unauthorized access events.
+
+###
+# Health Check
+GET {{baseUrl}}/health
+
+###
+# Login - Successful
+# After a successful login, copy the token value from the response
+# and paste it into the @authToken variable below.
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{password}}"
+}
+
+###
+# Set this after a successful login.
+@authToken = paste-jwt-token-here
+
+###
+# Current Authenticated User
+GET {{apiUrl}}/auth/me
+Authorization: Bearer {{authToken}}
+
+###
+# RBAC - Guest Level
+# Baseline authenticated route. Useful for confirming the token works.
+GET {{apiUrl}}/secure/guest
+Authorization: Bearer {{authToken}}
+
+###
+# RBAC - HomeOwner Level
+# Expected side effect with a Guest token:
+# sends a high-priority unauthorized access alert email.
+GET {{apiUrl}}/secure/homeowner
+Authorization: Bearer {{authToken}}
+
+###
+# RBAC - SuperAdmin Level
+# Expected side effect with a Guest or HomeOwner token:
+# sends a high-priority unauthorized access alert email.
+GET {{apiUrl}}/secure/superadmin
+Authorization: Bearer {{authToken}}
+
+###
+# RBAC - Admin Only Demo Route
+GET {{apiUrl}}/auth/admin-only
+Authorization: Bearer {{authToken}}
+
+###
+# Login - Failed Attempt 1
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{wrongPassword}}"
+}
+
+###
+# Login - Failed Attempt 2
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{wrongPassword}}"
+}
+
+###
+# Login - Failed Attempt 3
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{wrongPassword}}"
+}
+
+###
+# Login - Failed Attempt 4
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{wrongPassword}}"
+}
+
+###
+# Login - Failed Attempt 5
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{wrongPassword}}"
+}
+
+###
+# Login - Failed Attempt 6
+# This should lock the account because the controller locks when
+# failedLoginAttempts exceeds 5.
+# Expected side effect: sends a high-priority account lockout alert email.
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{wrongPassword}}"
+}
+
+###
+# Login After Lockout
+# Expected response: 423 Locked
+POST {{apiUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "usernameOrEmail": "{{usernameOrEmail}}",
+  "password": "{{password}}"
+}
+
+###
+# Protected Route Without Token
+# Expected response: 401 Unauthorized
+# Expected side effect: sends a high-priority unauthorized access alert email.
+GET {{apiUrl}}/secure/guest
+
+###
+# Protected Route With Invalid Token
+# Expected response: 401 Unauthorized
+# This fails inside authenticateJWT before RBAC runs, so no RBAC email alert is sent.
+GET {{apiUrl}}/secure/guest
+Authorization: Bearer invalid-token
+
+###
+# SuperAdmin - List Locked Users
+# Use this to find locked user IDs before calling the unlock route.
+GET {{apiUrl}}/auth/users/locked
+Authorization: Bearer {{authToken}}
+
+###
+# SuperAdmin - Unlock Locked User Account
+# Steps:
+# 1. Log in as a SuperAdmin and copy the JWT into @authToken
+# 2. Replace @targetUserId with the locked user's MongoDB _id
+# 3. Send this request to reset failedLoginAttempts and isLocked
+PATCH {{apiUrl}}/auth/users/{{targetUserId}}/unlock
+Authorization: Bearer {{authToken}}
