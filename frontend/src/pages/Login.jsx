@@ -250,7 +250,7 @@ export default function Login({ onLoginSuccess }) {
       }
 
       if (normalizedMessage.includes('network error')) {
-        setError('Cannot connect to the backend. Make sure the API server is running on port 5000.');
+        setError('Cannot connect to the backend API. Please check your connection or environment settings.');
         return;
       }
 
