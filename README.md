@@ -2,6 +2,44 @@
 
 An IoT Smart Home project focused on real-time monitoring, device control, and security hardening. The current workspace combines a React dashboard, a Flask + SQLite operational backend for MQTT-driven telemetry, ESP32/ESP8266 firmware, and a parallel Node.js security API track that introduces JWT authentication, role-based access control, brute-force protection, account lock/unlock flows, audit logging, and email alerts. The project also documents secure MQTT communication over MQTTS/TLS for cloud-broker deployments.
 
+## 🌍 Live Demo & Deployment Notes
+
+Welcome! Below you'll find live links, environment setup instructions, and important deployment notes for the IoT Smart Home Security system. This information is especially helpful for recruiters, technical reviewers, and anyone evaluating the project.
+
+### 🚀 Live Links
+
+- **Frontend (Live Demo):** [https://iot-smarthome-security.vercel.app](https://iot-smarthome-security.vercel.app)
+- **Backend API Base URL:** [https://iot-smarthome-security.onrender.com/api](https://iot-smarthome-security.onrender.com/api)
+
+### ⚙️ Environment Variables Setup (.env)
+
+- **Frontend:**
+  - The `VITE_API_BASE_URL` variable **MUST** include `/api` at the end. Example:
+    ```env
+    VITE_API_BASE_URL=https://iot-smarthome-security.onrender.com/api
+    ```
+- **Backend:**
+  - Set the following for CORS configuration:
+    ```env
+    FRONTEND_ORIGIN=https://iot-smarthome-security.vercel.app
+    ```
+- **Database:**
+  - Provide a valid MongoDB Atlas connection string in the backend `.env` file. Example:
+    ```env
+    MONGO_URI=your_mongodb_string
+    ```
+
+### 📝 Important Deployment Notes
+
+- **Render Free Tier Sleep Mode:**
+  - The backend API on Render may take 50-60 seconds to spin up on the first request if it has been inactive. Please be patient when accessing the API after a period of inactivity.
+- **Rate Limiting:**
+  - The `/api/auth/login` endpoint is protected by a strict rate limiter to prevent brute-force attacks. If you see a "Too many authentication attempts" message, please wait 15 minutes before trying again.
+- **MongoDB Network Access:**
+  - Ensure your MongoDB Atlas Network Access is set to `0.0.0.0/0` (Allow access from anywhere) so that the Render backend can successfully connect to the database.
+
+Thank you for reviewing and exploring the IoT Smart Home Security platform!
+
 ## Current Features
 
 ### Frontend
