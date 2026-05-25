@@ -1,17 +1,17 @@
 /**
- * Dashboard.jsx — Main "Smart Home Status" view
+ * Dashboard.jsx — Smart Home Multi-Room Grid View
  *
  * Features:
- *   • LiveSensorWidget — animated glow ring on each new MQTT value
- *   • Security "Intrusion Detection" hero card
- *   • Security Light + Ceiling Fan device toggles
- *   • MQTT Command Log (last 8 entries)
- *   • Mini sparkline charts per sensor (Recharts)
+ *   • Multi-room RoomCard grid layout (Living Room, Kitchen, Bedroom, Study)
+ *   • Modern relay toggle switches (ON/OFF binary state)
+ *   • Live sensor readings (Temperature, Humidity, Motion)
+ *   • Security Intrusion Detection hero card
+ *   • Locked Accounts management widget
+ *   • MQTT Command Log
  *
- * Color Spec (strictly enforced via useTheme):
- *   Light: #F8F6F0 bg / #FFFFFF cards / #1A4D2E Forest Green accent
+ * Color Spec (Earth tones):
+ *   Light: #F8F6F0 bg / #FFFFFF cards / #1A4D2E Forest Green accent / #B8860B Dark Amber
  *   Dark:  #352315 bg / #4A3221 cards / #FFFFFF text / #C8AA76 Muted Gold accent
- *   Sparklines in dark: muted gold stroke, fillOpacity 0.12, near-invisible grid
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -24,6 +24,7 @@ import {
   EyeOff,
   Fan,
   Lightbulb,
+  Power,
   Radio,
   RefreshCw,
   ShieldAlert,
@@ -39,10 +40,8 @@ import {
 } from 'lucide-react';
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip,
+  CartesianGrid, XAxis, YAxis, Legend // Thêm 4 component này
 } from '../lib/recharts-shim.js';
-// ToggleSwitch removed — imported but never rendered in this component (used in SecurityView)
-// SectionHeader is defined locally below to guarantee it is never undefined
-// (eliminates any module-resolution race that reports 'got undefined').
 import FanControl from '../components/FanControl';
 import LightControl from '../components/LightControl';
 import { useTheme } from '../contexts/DarkModeContext';
@@ -654,6 +653,7 @@ export default function Dashboard({
   commandLog,
   toggleDevice,
   isConnected,
+  allRoomsData = {},
   canManageSystem = true,
 }) {
   const { isDark, colors, chartColors } = useTheme();
@@ -663,6 +663,7 @@ export default function Dashboard({
   const [unlockingUserId, setUnlockingUserId] = useState('');
   const [lockedUsersError, setLockedUsersError] = useState('');
   const [unlockSuccessMessage, setUnlockSuccessMessage] = useState('');
+  const [chartHistory, setChartHistory] = useState([]);
 
   // ── Defensive: fall back to safe sentinels if data hasn't arrived yet ──
   const safeData    = sensorData    ?? SAFE_SENSOR;
@@ -673,6 +674,44 @@ export default function Dashboard({
 
   // Guard: show skeleton until at least temperature is a real number
   const hasData = typeof temperature?.current === 'number';
+
+  // ── Historical Data Collection for Multi-Room Chart ──
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Format current time as HH:mm:ss
+      const now = new Date();
+      const timeString = now.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+
+      // Extract current values from allRoomsData
+      const livingRoomTemp = parseFloat(allRoomsData?.livingroom?.temperature) || 0;
+      const livingRoomHumid = parseFloat(allRoomsData?.livingroom?.humidity) || 0;
+      const bedroomTemp = parseFloat(allRoomsData?.bedroom?.temperature) || 0;
+      const bedroomHumid = parseFloat(allRoomsData?.bedroom?.humidity) || 0;
+      const kitchenTemp = parseFloat(allRoomsData?.kitchen?.temperature) || 0;
+      const kitchenHumid = parseFloat(allRoomsData?.kitchen?.humidity) || 0;
+
+      // Create new data point with timestamp
+      const newDataPoint = {
+        time: timeString,
+        livingRoomTemp,
+        livingRoomHumid,
+        bedroomTemp,
+        bedroomHumid,
+        kitchenTemp,
+        kitchenHumid,
+      };
+
+      // Add to history and keep only last 20 items
+      setChartHistory((prev) => [...prev, newDataPoint].slice(-20));
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [allRoomsData]);
 
   useEffect(() => {
     const fetchLockedUsers = async () => {
@@ -848,6 +887,97 @@ export default function Dashboard({
           onRefresh={refreshLockedUsers}
           onUnlock={handleUnlockLockedUser}
         />
+      )}
+
+      {/* Multi-Room Historical Chart */}
+      {chartHistory.length > 0 && (
+        <section className="animate-fade-slide-up delay-100">
+          <SectionHeader
+            icon={Thermometer}
+            title="Multi-Room History Chart"
+            subtitle="Temperature and Humidity trends — Last 20 readings (5s intervals)"
+          />
+          <div
+            className="rounded-3xl border p-6 transition-all duration-300"
+            style={{
+              borderColor: colors.border,
+              backgroundColor: isDark ? colors.card : '#FFFFFF',
+            }}
+          >
+            <div className="h-80 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartHistory} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gradLR" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#B8860B" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#B8860B" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradBR" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#228B22" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#228B22" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradKT" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#A0522D" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#A0522D" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Tooltip
+                    contentStyle={{
+                      background: chartColors.tooltipBg,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 10,
+                      fontSize: 11,
+                      color: colors.text,
+                      padding: '8px 12px',
+                    }}
+                    formatter={(value) => value.toFixed(1)}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="livingRoomTemp"
+                    stroke="#B8860B"
+                    fill="url(#gradLR)"
+                    name="Living Room Temp (°C)"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="bedroomTemp"
+                    stroke="#228B22"
+                    fill="url(#gradBR)"
+                    name="Bedroom Temp (°C)"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="kitchenTemp"
+                    stroke="#A0522D"
+                    fill="url(#gradKT)"
+                    name="Kitchen Temp (°C)"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-3 text-[11px]">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full" style={{ backgroundColor: '#B8860B' }} />
+                <span style={{ color: colors.textSecondary }}>Living Room</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full" style={{ backgroundColor: '#228B22' }} />
+                <span style={{ color: colors.textSecondary }}>Bedroom</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full" style={{ backgroundColor: '#A0522D' }} />
+                <span style={{ color: colors.textSecondary }}>Kitchen</span>
+              </div>
+            </div>
+          </div>
+        </section>
       )}
 
       {/* Live Sensor Widgets */}

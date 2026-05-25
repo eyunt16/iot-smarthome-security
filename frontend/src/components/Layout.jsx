@@ -2,6 +2,7 @@ import React from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { useTheme } from '../contexts/DarkModeContext';
+import { canManageSystem } from '../services/authSession';
 import {
   LayoutDashboard, ShieldCheck, Leaf, UserCircle,
 } from 'lucide-react';
@@ -74,8 +75,7 @@ const MOBILE_NAV = [
 
 function MobileNav({ activePage, setActivePage, currentUser }) {
   const { isDark, colors } = useTheme();
-  const role = String(currentUser?.role || 'admin').toLowerCase();
-  const navItems = role === 'admin'
+  const navItems = canManageSystem(currentUser)
     ? MOBILE_NAV
     : MOBILE_NAV.filter((item) => item.id !== 'security');
 

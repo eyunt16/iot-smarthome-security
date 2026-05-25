@@ -10,6 +10,7 @@ import {
   Home,
 } from 'lucide-react';
 import { useTheme } from '../contexts/DarkModeContext';
+import { canManageSystem, getRoleLabel } from '../services/authSession';
 
 const NAV = [
   { id: 'dashboard',   label: 'Dashboard',   icon: LayoutDashboard },
@@ -20,11 +21,10 @@ const NAV = [
 
 export default function Sidebar({ activePage, setActivePage, onLogout, currentUser }) {
   const { isDark, colors } = useTheme();
-  const role = String(currentUser?.role || 'admin').toLowerCase();
-  const isAdmin = role === 'admin';
+  const isAdmin = canManageSystem(currentUser);
   const navItems = isAdmin ? NAV : NAV.filter((item) => item.id !== 'security');
   const displayName = currentUser?.username || 'Guest User';
-  const roleLabel = isAdmin ? 'System Admin' : 'Customer Viewer';
+  const roleLabel = isAdmin ? 'System Admin' : getRoleLabel(currentUser);
 
   // Global accent — Forest Green (light) or Muted Gold (dark)
   const accent     = isDark ? '#C8AA76' : '#1A4D2E';

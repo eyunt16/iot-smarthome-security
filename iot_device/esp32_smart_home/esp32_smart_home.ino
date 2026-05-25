@@ -1,4 +1,4 @@
-/*
+;/*
  * ==========================================================================================================
  * TUYEN HOME - ESP32 SMART HOME FIRMWARE
  * Gia dinh hien tai dua tren codebase san co:
@@ -20,8 +20,8 @@
 // ==========================================================================================================
 // CONFIGURATION BLOCK
 // ==========================================================================================================
-const char* WIFI_SSID = "International University";
-const char* WIFI_PASSWORD = "";
+const char* WIFI_SSID = "S-HOME";
+const char* WIFI_PASSWORD = "123456789a";
 
 const char* HIVEMQ_URL = "4d9428ecfbbe4084896b1c3a240cbe9e.s1.eu.hivemq.cloud";
 const uint16_t HIVEMQ_PORT = 8883;

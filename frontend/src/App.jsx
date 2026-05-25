@@ -10,6 +10,7 @@ import SecurityView   from './pages/SecurityView';
 import ProfileView    from './pages/ProfileView';
 import Analytics      from './pages/Analytics';
 import {
+  AUTH_STATE_CHANGE_EVENT,
   canManageSystem,
   clearAuthSession,
   getStoredToken,
@@ -132,6 +133,21 @@ export default function App() {
     Boolean(getStoredToken())
   );
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
+
+  useEffect(() => {
+    const syncAuthState = () => {
+      setIsAuthenticated(Boolean(getStoredToken()));
+      setCurrentUser(getStoredUser());
+    };
+
+    window.addEventListener('storage', syncAuthState);
+    window.addEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState);
+
+    return () => {
+      window.removeEventListener('storage', syncAuthState);
+      window.removeEventListener(AUTH_STATE_CHANGE_EVENT, syncAuthState);
+    };
+  }, []);
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user || getStoredUser());

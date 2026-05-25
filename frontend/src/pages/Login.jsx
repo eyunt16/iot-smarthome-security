@@ -15,7 +15,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Eye, EyeOff, Lock, Moon, ShieldCheck, Sun, UserCheck, UserPlus, User,
+  Eye, EyeOff, Lock, Mail, Moon, ShieldCheck, Sun, UserCheck, UserPlus, User,
 } from 'lucide-react';
 import { useTheme } from '../contexts/DarkModeContext';
 import { loginUser, registerUser } from '../services/api';
@@ -110,6 +110,32 @@ function Field({ id, type = 'text', value, onChange, placeholder, icon: Icon, to
   );
 }
 
+function SelectField({ id, value, onChange, options, tok, disabled }) {
+  return (
+    <select
+      id={id}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      className="w-full rounded-2xl border px-4 py-3.5 text-sm transition-all duration-200
+                 focus:outline-none disabled:opacity-50"
+      style={{
+        backgroundColor: tok.inputBg,
+        borderColor: tok.inputBorder,
+        color: tok.text,
+      }}
+      onFocus={(e) => { e.target.style.borderColor = tok.inputFocus; e.target.style.boxShadow = `0 0 0 3px ${tok.inputFocus}22`; }}
+      onBlur={(e)  => { e.target.style.borderColor = tok.inputBorder; e.target.style.boxShadow = 'none'; }}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function PasswordField({ id, value, onChange, placeholder, tok, autoComplete, disabled }) {
   const [show, setShow] = useState(false);
 
@@ -176,10 +202,12 @@ export default function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  // Customer registration fields
+  // Registration fields
   const [registerUsername, setRegisterUsername] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
   const [reqPassword, setReqPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [registerRole, setRegisterRole] = useState('customer');
 
   // UI state
   const [error,   setError]   = useState('');
@@ -208,11 +236,11 @@ export default function Login({ onLoginSuccess }) {
 
     try {
       const response = await loginUser({
-        username: username.trim(),
+        usernameOrEmail: username.trim(),
         password,
       });
 
-      if (response?.token) {
+      if (response?.status === 'success' && response?.token) {
         saveAuthSession({
           token: response.token,
           user: response.user,
@@ -266,8 +294,8 @@ export default function Login({ onLoginSuccess }) {
     clearAuthFeedback();
     setLoading(true);
 
-    if (!registerUsername.trim()) {
-      setError('Username is required.');
+    if (!registerUsername.trim() || !registerEmail.trim()) {
+      setError('Username and email are required.');
       setLoading(false);
       return;
     }
@@ -281,15 +309,18 @@ export default function Login({ onLoginSuccess }) {
     try {
       const response = await registerUser({
         username: registerUsername.trim(),
+        email: registerEmail.trim(),
         password: reqPassword,
         confirmPassword,
-        role: 'customer',
+        role: registerRole,
       });
 
-      setSuccess(response?.message || 'Customer account created. You can sign in now.');
+      setSuccess(response?.message || 'Account created successfully. You can sign in now.');
       setRegisterUsername('');
+      setRegisterEmail('');
       setReqPassword('');
       setConfirmPassword('');
+      setRegisterRole('customer');
       setDirection(-1);
       setIsLoginView(true);
     } catch (error) {
@@ -480,6 +511,36 @@ export default function Login({ onLoginSuccess }) {
                     icon={User}
                     tok={tok}
                     autoComplete="username"
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="ra-email" tok={tok}>Email</Label>
+                  <Field
+                    id="ra-email"
+                    type="email"
+                    value={registerEmail}
+                    onChange={(e) => setRegisterEmail(e.target.value)}
+                    placeholder="Enter email address"
+                    icon={Mail}
+                    tok={tok}
+                    autoComplete="email"
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="ra-role" tok={tok}>Account Type</Label>
+                  <SelectField
+                    id="ra-role"
+                    value={registerRole}
+                    onChange={(e) => setRegisterRole(e.target.value)}
+                    options={[
+                      { value: 'customer', label: 'Customer' },
+                      { value: 'guest', label: 'Guest' },
+                    ]}
+                    tok={tok}
                     disabled={loading}
                   />
                 </div>

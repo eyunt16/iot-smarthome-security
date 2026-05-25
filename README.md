@@ -26,7 +26,7 @@ Welcome! Below you'll find live links, environment setup instructions, and impor
 - **Database:**
   - Provide a valid MongoDB Atlas connection string in the backend `.env` file. Example:
     ```env
-    MONGO_URI=your_mongodb_string
+    MONGODB_URI=your_mongodb_string
     ```
 
 ### 📝 Important Deployment Notes

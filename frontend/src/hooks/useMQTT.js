@@ -35,6 +35,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import mqtt from 'mqtt';
 
 // ── Constants ─────────────────────────────────────────────────
 const HISTORY_POINTS   = 24;         // rolling window size
@@ -64,6 +65,12 @@ export function useMQTT() {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate,  setLastUpdate]  = useState(null);
 
+  const [allRoomsData, setAllRoomsData] = useState({
+    livingroom: { temperature: 27.5, humidity: 60 },
+    bedroom: { temperature: 24.0, humidity: 55 },
+    kitchen: { temperature: 31.2, humidity: 70 }
+  });
+
   const [sensorData, setSensorData] = useState(() => ({
     temperature: { current: 27.4, history: buildHistory(27, 4) },
     humidity:    { current: 58,   history: buildHistory(58, 10) },
@@ -92,10 +99,62 @@ export function useMQTT() {
   const timerRef = useRef(null);
 
   useEffect(() => {
-    // Simulate initial connection delay
-    const connectTimer = setTimeout(() => {
+    // Connect to real MQTT broker
+    const mqttClient = mqtt.connect('wss://4d9428ecfbbe4084896b1c3a240cbe9e.s1.eu.hivemq.cloud:8884/mqtt', {
+      username: 'Tuyen',
+      password: '123456789tT',
+      protocol: 'wss',
+      keepalive: 60,
+    });
+
+    mqttClient.on('connect', () => {
       setIsConnected(true);
       addLog('$SYS/broker', 'HiveMQ Cloud · MQTTS · TLS 1.3 · Port 8883', 'system');
+      mqttClient.subscribe('tuyenhome/env/#', { qos: 1 }, (err) => {
+        if (err) {
+          console.error('MQTT subscribe error:', err);
+        } else {
+          console.log('Subscribed to tuyenhome/env/#');
+        }
+      });
+    });
+
+    mqttClient.on('message', (topic, message) => {
+      try {
+        const roomKey = topic.split('/')[2];
+        const payload = JSON.parse(message.toString());
+
+        setAllRoomsData((prevData) => ({
+          ...prevData,
+          [roomKey]: {
+            temperature: parseFloat(payload.temperature),
+            humidity: parseFloat(payload.humidity)
+          }
+        }));
+        setLastUpdate(new Date());
+        addLog(topic, JSON.stringify(payload), 'receive');
+      } catch (err) {
+        console.error('MQTT message parse error:', err);
+      }
+    });
+
+    mqttClient.on('error', (err) => {
+      console.error('MQTT connection error:', err);
+    });
+
+    mqttClient.on('close', () => {
+      setIsConnected(false);
+    });
+
+    return () => {
+      mqttClient.end();
+    };
+  }, []);
+
+  // Legacy simulation timer (keep for fallback)
+  useEffect(() => {
+    // Simulate initial connection delay
+    const connectTimer = setTimeout(() => {
     }, 1200);
 
     // Periodic data ticks

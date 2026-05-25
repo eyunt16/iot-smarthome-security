@@ -24,4 +24,8 @@ export default defineConfig({
       'react-smooth',
     ],
   },
+  // THÊM ĐOẠN NÀY ĐỂ TẮT CẢNH BÁO GIỚI HẠN SIZE CỦA VERCEL
+  build: {
+    chunkSizeWarningLimit: 1600, 
+  }
 })

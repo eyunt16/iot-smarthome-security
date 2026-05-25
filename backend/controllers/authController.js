@@ -5,6 +5,10 @@ const SecurityLog = require('../models/SecurityLog');
 const { sendSecurityAlert } = require('../utils/emailAlert');
 
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const REGISTRABLE_ROLES = Object.freeze({
+  customer: 'HomeOwner',
+  guest: 'Guest',
+});
 
 function getClientIp(req) {
   const forwardedFor = req.headers['x-forwarded-for'];
@@ -197,6 +201,90 @@ async function login(req, res) {
   }
 }
 
+async function register(req, res) {
+  const {
+    username,
+    email,
+    password,
+    confirmPassword,
+    role,
+  } = req.body || {};
+
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedRole = String(role || 'customer').trim().toLowerCase();
+  const mappedRole = REGISTRABLE_ROLES[normalizedRole];
+
+  if (!normalizedUsername || !normalizedEmail || !password || !confirmPassword) {
+    return res.status(400).json({
+      message: 'username, email, password, and confirmPassword are required.',
+    });
+  }
+
+  if (password !== confirmPassword) {
+    return res.status(400).json({
+      message: 'Passwords do not match.',
+    });
+  }
+
+  if (!mappedRole) {
+    return res.status(400).json({
+      message: 'Role must be either customer or guest.',
+    });
+  }
+
+  if (password.length < 8) {
+    return res.status(400).json({
+      message: 'Password must be at least 8 characters long.',
+    });
+  }
+
+  try {
+    const existingUser = await User.findOne({
+      $or: [
+        { username: normalizedUsername },
+        { email: normalizedEmail },
+      ],
+    }).lean();
+
+    if (existingUser) {
+      return res.status(409).json({
+        message: existingUser.username === normalizedUsername
+          ? 'Username already exists.'
+          : 'Email already exists.',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const user = await User.create({
+      username: normalizedUsername,
+      email: normalizedEmail,
+      passwordHash,
+      role: mappedRole,
+      failedLoginAttempts: 0,
+      isLocked: false,
+      lastLoginIP: null,
+    });
+
+    return res.status(201).json({
+      message: `${normalizedRole === 'guest' ? 'Guest' : 'Customer'} account created successfully.`,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to create account.',
+    });
+  }
+}
+
 async function unlockUserAccount(req, res) {
   const { userId } = req.params;
   const adminIp = getClientIp(req);
@@ -266,6 +354,7 @@ async function listLockedUsers(_req, res) {
 
 module.exports = {
   login,
+  register,
   listLockedUsers,
   unlockUserAccount,
   MAX_FAILED_LOGIN_ATTEMPTS,

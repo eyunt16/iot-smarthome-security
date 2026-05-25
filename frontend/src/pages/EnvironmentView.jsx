@@ -1,133 +1,86 @@
 /**
  * EnvironmentView.jsx — Full-page real-time sensor charts
- * Uses Recharts AreaChart w/ animated rolling data window
+ * Merged Multi-line AreaChart with original UI
  */
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Droplets, Thermometer, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Droplets, Thermometer, Leaf } from 'lucide-react';
 import {
-  Area, AreaChart, CartesianGrid, ResponsiveContainer,
-  Tooltip, XAxis, YAxis, ReferenceLine,
+  Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer,
+  Tooltip, XAxis, YAxis
 } from '../lib/recharts-shim.js';
 import { SectionHeader } from '../components/ui/SectionHeader';
-import { Leaf } from 'lucide-react';
 import { useTheme } from '../contexts/DarkModeContext';
 
-// ── Recharts custom tooltip ────────────────────────────────────
-function CustomTooltip({ active, payload, label, unit, isDark, colors }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div 
-      className="rounded-2xl border px-4 py-3 shadow-lg transition-colors duration-300"
-      style={{
-        borderColor: colors.border,
-        backgroundColor: isDark ? colors.card : '#FFFFFF',
-      }}
-    >
-      <p className="text-[10px] font-bold uppercase tracking-wider mb-1 transition-colors duration-300" style={{ color: colors.textSecondary }}>{label}</p>
-      <p className="font-display text-xl font-bold transition-colors duration-300" style={{ color: colors.text }}>
-        {payload[0].value}{unit}
-      </p>
-    </div>
-  );
+// ── Cấu hình màu cho từng Sensor ──────────────────────────────
+const SENSOR_CONFIG = {
+  temperature: { label: 'Temperature', color: '#c27b4a' },
+  humidity: { label: 'Humidity', color: '#4a7a9b' },
+  light: { label: 'Light', color: '#e7eb5c' },
+  motion: { label: 'Motion', color: '#16a393' },
+
+};
+
+// ── Hàm xử lý Data gộp chung trục thời gian ───────────────────
+function formatTimeLabel(value) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return String(value);
 }
 
-// ── Full Trend Chart ──────────────────────────────────────────
-function TrendChart({ data, color, gradId, unit, refValue, label }) {
+function buildChartData(sensorData) {
+  const metrics = Object.keys(SENSOR_CONFIG).filter(
+    (key) => Array.isArray(sensorData?.[key]?.history) && sensorData[key].history.length > 0
+  );
+
+  if (metrics.length === 0) return { chartData: [], metrics: [] };
+
+  const maxLength = Math.max(...metrics.map((key) => sensorData[key].history.length));
+
+  const chartData = Array.from({ length: maxLength }, (_, index) => {
+    const row = {};
+    metrics.forEach((key) => {
+      const point = sensorData[key].history[index];
+      if (!point) return;
+      row.time = point.time || point.timestamp || row.time || `${index + 1}`;
+      row[key] = typeof point.value === 'boolean' ? Number(point.value) : Number.parseFloat(point.value);
+    });
+    return row;
+  }).filter((row) => row.time);
+
+  return { chartData, metrics };
+}
+
+// ── Recharts custom tooltip (Multi-line) ──────────────────────
+function CustomTooltip({ active, payload, label }) {
   const { isDark, colors } = useTheme();
-  const values = data.map(d => d.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const latest = values[values.length - 1] ?? 0;
-  const prev    = values[values.length - 2] ?? latest;
-  const delta   = (latest - prev).toFixed(1);
-  const trend   = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+
+  if (!active || !payload?.length) return null;
 
   return (
-    <div 
-      className="rounded-3xl border p-7 transition-colors duration-300"
+    <div
+      className="rounded-2xl border px-4 py-3 shadow-lg"
       style={{
+        backgroundColor: isDark ? colors.card : '#ffffff',
         borderColor: colors.border,
-        backgroundColor: isDark ? colors.card : '#FFFFFF',
-        boxShadow: isDark 
-          ? '0 4px 12px rgba(0, 0, 0, 0.1)'
-          : '0 4px 20px rgba(155,124,84,0.07)'
+        color: colors.text,
       }}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider mb-1 transition-colors duration-300" style={{ color: colors.textSecondary }}>{label}</p>
-          <div className="flex items-baseline gap-2">
-            <span className="font-display text-5xl font-bold transition-colors duration-300" style={{ color: colors.text }}>{latest}</span>
-            <span className="text-xl font-medium transition-colors duration-300" style={{ color: colors.textSecondary }}>{unit}</span>
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            {trend === 'up'   && <TrendingUp   size={14} className="text-red-400" />}
-            {trend === 'down' && <TrendingDown size={14} className="text-green-500" />}
-            {trend === 'flat' && <Minus        size={14} style={{ color: colors.textSecondary }} />}
-            <span className={`text-[12px] font-semibold transition-colors duration-300`} style={{
-              color: trend === 'up' ? '#ff6b6b' : trend === 'down' ? '#51cf66' : colors.textSecondary
-            }}>
-              {delta > 0 ? '+' : ''}{delta}{unit} from last reading
-            </span>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="text-[9px] font-bold uppercase tracking-wider transition-colors duration-300" style={{ color: colors.textSecondary }}>24-pt window</p>
-          <p className="text-[11px] font-semibold mt-1 transition-colors duration-300" style={{ color: colors.textSecondary }}>
-            H: <span style={{ color }}>{max}{unit}</span>
-            {'  '}
-            L: <span style={{ color }}>{min}{unit}</span>
-          </p>
-        </div>
-      </div>
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider" style={{ color: colors.textSecondary }}>
+        {formatTimeLabel(label)}
+      </p>
 
-      {/* Chart */}
-      <div className="h-[240px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 10, right: 8, left: -18, bottom: 4 }}>
-            <defs>
-              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor={color} stopOpacity={0.22} />
-                <stop offset="95%" stopColor={color} stopOpacity={0}    />
-              </linearGradient>
-            </defs>
-            <CartesianGrid 
-              vertical={false} 
-              stroke={isDark ? 'rgba(102, 100, 95, 0.1)' : 'rgba(144,116,74,0.07)'} 
-            />
-            <XAxis
-              dataKey="time"
-              tick={{ fontSize: 10, fill: colors.textSecondary }}
-              tickLine={false} axisLine={false}
-              interval={Math.floor(data.length / 5)}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: colors.textSecondary }}
-              tickLine={false} axisLine={false}
-              domain={['dataMin - 2', 'dataMax + 2']}
-            />
-            {refValue != null && (
-              <ReferenceLine
-                y={refValue} stroke={color} strokeDasharray="4 3"
-                strokeOpacity={0.5}
-                label={{ value: `Target ${refValue}${unit}`, fontSize: 9, fill: color, position: 'insideTopRight' }}
-              />
-            )}
-            <Tooltip content={<CustomTooltip unit={unit} isDark={isDark} colors={colors} />} />
-            <Area
-              type="monotone" dataKey="value"
-              stroke={color} strokeWidth={2.5}
-              fill={`url(#${gradId})`}
-              dot={false}
-              isAnimationActive={true} animationDuration={500}
-              activeDot={{ r: 5, fill: color, strokeWidth: 0 }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {payload.map((entry) => (
+        <div key={entry.dataKey} className="flex items-center gap-2 text-sm mt-1">
+          <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+          <span style={{ color: colors.textSecondary }}>{SENSOR_CONFIG[entry.dataKey]?.label || entry.dataKey}:</span>
+          <span className="font-display font-bold text-lg">{entry.value}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -141,9 +94,7 @@ function StatPill({ label, value }) {
       style={{
         borderColor: colors.border,
         backgroundColor: isDark ? colors.card : '#FFFFFF',
-        boxShadow: isDark 
-          ? '0 2px 8px rgba(0, 0, 0, 0.1)'
-          : '0 2px 8px rgba(155,124,84,0.05)'
+        boxShadow: isDark ? '0 2px 8px rgba(0, 0, 0, 0.1)' : '0 2px 8px rgba(155,124,84,0.05)'
       }}
     >
       <p className="text-[9px] font-bold uppercase tracking-wider transition-colors duration-300" style={{ color: colors.textSecondary }}>{label}</p>
@@ -157,8 +108,12 @@ export default function EnvironmentView({ sensorData }) {
   const { isDark, colors } = useTheme();
   const { temperature, humidity } = sensorData;
 
-  const tempValues = temperature.history.map(d => d.value);
-  const humValues  = humidity.history.map(d => d.value);
+  // Lấy data cho StatPills
+  const tempValues = temperature?.history?.map(d => d.value) || [0];
+  const humValues  = humidity?.history?.map(d => d.value) || [0];
+
+  // Lấy data đã gộp cho Chart
+  const { chartData, metrics } = buildChartData(sensorData);
 
   return (
     <motion.div
@@ -169,87 +124,91 @@ export default function EnvironmentView({ sensorData }) {
       transition={{ duration: 0.5, ease: 'easeOut' }}
     >
 
-      {/* Overview stat pills */}
+      {/* Overview stat pills (Giữ nguyên giao diện cũ của bạn) */}
       <section>
-        <SectionHeader icon={Leaf} title="Environment Overview" subtitle="Real-time DHT11 sensor data via MQTT · Rolling 24-point window" />
+        <SectionHeader icon={Leaf} title="Environment Overview" subtitle="Real-time multi-sensor data via MQTT" />
         <div className="flex flex-wrap gap-3 mb-0">
-          <StatPill label="Current Temp"    value={`${temperature.current} °C`} />
-          <StatPill label="Current Humidity" value={`${humidity.current} %`}    />
+          <StatPill label="Current Temp"    value={`${temperature?.current || 0} °C`} />
+          <StatPill label="Current Humidity" value={`${humidity?.current || 0} %`}    />
           <StatPill label="Temp (min/max)"  value={`${Math.min(...tempValues).toFixed(1)} / ${Math.max(...tempValues).toFixed(1)} °C`} />
           <StatPill label="Humidity (min/max)" value={`${Math.min(...humValues)} / ${Math.max(...humValues)} %`} />
         </div>
       </section>
 
-      {/* Temperature Chart */}
+      {/* Biểu đồ Multi-line gộp */}
       <section>
-        <SectionHeader icon={Thermometer} title="Temperature Trend" />
-        <TrendChart
-          data={temperature.history}
-          color="#c27b4a"
-          gradId="grad-temp"
-          unit="°C"
-          refValue={26}
-          label="TEMPERATURE · DHT11"
-        />
-      </section>
-
-      {/* Humidity Chart + Error Card */}
-      <section>
-        <SectionHeader icon={Droplets} title="Humidity Trend" />
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_auto]">
-          <TrendChart
-            data={humidity.history}
-            color="#4a7a9b"
-            gradId="grad-hum"
-            unit="%"
-            refValue={60}
-            label="HUMIDITY · DHT11"
-          />
-
-          {/* Error state demo card */}
-          <div 
-            className="xl:w-[300px] rounded-3xl border p-6 self-start relative overflow-hidden transition-colors duration-300"
-            style={{
-              borderColor: isDark ? colors.border : '#d5ccc0',
-              backgroundColor: isDark ? `${colors.card}99` : '#f5f2ee'
-            }}
-          >
-            {/* Diagonal stripe overlay */}
-            <div
-              className="pointer-events-none absolute inset-0 rounded-3xl opacity-[0.05]"
-              style={{
-                backgroundImage: isDark 
-                  ? 'repeating-linear-gradient(-45deg, rgba(255,255,255,0.1) 0, rgba(255,255,255,0.1) 1px, transparent 0, transparent 50%)'
-                  : 'repeating-linear-gradient(-45deg,#6b6560 0,#6b6560 1px,transparent 0,transparent 50%)',
-                backgroundSize: '8px 8px',
-              }}
-            />
-            <div className="relative">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="grid h-7 w-7 place-items-center rounded-xl bg-amber-100">
-                  <Droplets size={13} className="text-amber-500" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider transition-colors duration-300" style={{ color: colors.textSecondary }}>
-                  Humidity · DHT11
-                </span>
-                <span className="ml-auto rounded-full border border-amber-300/70 bg-amber-50 px-2 py-0.5 text-[9px] font-bold text-amber-700">
-                  Sensor Offline
-                </span>
+        <SectionHeader icon={Thermometer} title="Combined Sensor Trend" />
+        
+        <div 
+          className="rounded-3xl border p-7 transition-colors duration-300"
+          style={{
+            borderColor: colors.border,
+            backgroundColor: isDark ? colors.card : '#FFFFFF',
+            boxShadow: isDark ? '0 4px 12px rgba(0, 0, 0, 0.1)' : '0 4px 20px rgba(155,124,84,0.07)'
+          }}
+        >
+          <div className="h-[340px] w-full">
+            {chartData.length === 0 ? (
+              <div className="grid h-full place-items-center text-sm" style={{ color: colors.textSecondary }}>
+                Waiting for sensor data...
               </div>
-              <p className="font-display text-4xl font-bold mb-3 transition-colors duration-300" style={{ color: isDark ? `${colors.text}40` : '#2c2015'}} >-- %</p>
-              <div className="rounded-2xl border border-amber-200/60 px-4 py-3 transition-colors duration-300" style={{
-                backgroundColor: isDark ? 'rgba(217, 119, 6, 0.1)' : 'rgba(217, 119, 6, 0.1)',
-              }}>
-                <p className="text-[11px] leading-relaxed text-amber-700">
-                  <strong>Error State Demo:</strong> This card intentionally renders in offline mode to showcase the UI's tamper-detection and error-handling capabilities. In production, this state activates when the{' '}
-                  <code className="rounded px-1 font-mono text-[10px]" style={{ backgroundColor: isDark ? 'rgba(217, 119, 6, 0.2)' : 'rgba(217, 119, 6, 0.15)' }}>home/humidity</code>{' '}
-                  topic goes silent for &gt; 30 s.
-                </p>
-              </div>
-            </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -18, bottom: 0 }}>
+                  <defs>
+                    {metrics.map(key => (
+                      <linearGradient key={`grad-${key}`} id={`grad-${key}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%"  stopColor={SENSOR_CONFIG[key].color} stopOpacity={0.25} />
+                        <stop offset="95%" stopColor={SENSOR_CONFIG[key].color} stopOpacity={0}    />
+                      </linearGradient>
+                    ))}
+                  </defs>
+                  
+                  <CartesianGrid vertical={false} stroke={isDark ? 'rgba(102, 100, 95, 0.1)' : 'rgba(144,116,74,0.07)'} />
+                  
+                  <XAxis 
+                    dataKey="time" 
+                    tickFormatter={formatTimeLabel}
+                    tick={{ fontSize: 10, fill: colors.textSecondary }} 
+                    tickLine={false} axisLine={false} 
+                    interval="preserveStartEnd"
+                  />
+                  
+                  <YAxis 
+                    tick={{ fontSize: 10, fill: colors.textSecondary }} 
+                    tickLine={false} axisLine={false} 
+                  />
+                  
+                  <Tooltip content={<CustomTooltip />} />
+                  
+                  <Legend 
+                    verticalAlign="bottom" align="center" iconType="circle"
+                    wrapperStyle={{ paddingTop: 20, fontSize: '12px', color: colors.textSecondary }}
+                  />
+
+                  {metrics.map((key) => {
+                    const config = SENSOR_CONFIG[key];
+                    return (
+                      <Area
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        stroke={config.color}
+                        strokeWidth={2.5}
+                        fill={`url(#grad-${key})`}
+                        dot={false}
+                        activeDot={{ r: 5, fill: config.color, strokeWidth: 0 }}
+                        name={config.label}
+                      />
+                    );
+                  })}
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </section>
+
     </motion.div>
   );
 }

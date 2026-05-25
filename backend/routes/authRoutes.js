@@ -1,6 +1,7 @@
 const express = require('express');
 const {
   login,
+  register,
   listLockedUsers,
   unlockUserAccount,
 } = require('../controllers/authController');
@@ -10,6 +11,7 @@ const { requireSuperAdmin } = require('../middleware/rbac');
 const router = express.Router();
 
 router.post('/login', login);
+router.post('/register', register);
 
 router.get('/me', authenticateJWT, (req, res) => {
   return res.status(200).json({

@@ -28,6 +28,7 @@ import {
 import { SectionHeader }  from '../components/ui/SectionHeader';
 import { ToggleSwitch }   from '../components/ui/ToggleSwitch';
 import { useTheme }       from '../contexts/DarkModeContext';
+import { canManageSystem, getRoleLabel } from '../services/authSession';
 
 // ── Encryption Hero Banner ────────────────────────────────────
 // Light mode: deep forest green (premium secure feel).
@@ -261,10 +262,9 @@ function SystemInfo() {
 // ── MAIN ──────────────────────────────────────────────────────
 export default function ProfileView({ isConnected, currentUser }) {
   const { isDark, colors } = useTheme();
-  const role = String(currentUser?.role || 'admin').toLowerCase();
-  const isAdmin = role === 'admin';
+  const isAdmin = canManageSystem(currentUser);
   const displayName = currentUser?.username || 'User';
-  const roleLabel = isAdmin ? 'System Admin' : 'Customer';
+  const roleLabel = getRoleLabel(currentUser);
   const accessLabel = isAdmin ? 'Full Control' : 'Monitoring Only';
 
   return (

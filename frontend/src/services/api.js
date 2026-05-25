@@ -1,10 +1,15 @@
 import axios from 'axios';
+import {
+  AUTH_STATE_CHANGE_EVENT,
+  clearAuthSession,
+  getStoredToken,
+} from './authSession';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').trim();
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true, // THÊM DÒNG NÀY ĐỂ KHỚP VỚI BACKEND
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -12,7 +17,7 @@ export const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -26,10 +31,20 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('authUser');
-      window.location.href = '/login';
+    const requestUrl = String(error.config?.url || '');
+    const isAuthBoundaryRequest =
+      requestUrl.includes('/auth/login')
+      || requestUrl.includes('/auth/register');
+
+    if (error.response?.status === 401 && !isAuthBoundaryRequest && getStoredToken()) {
+      clearAuthSession();
+
+      if (window.location.pathname !== '/login') {
+        window.history.pushState({}, '', '/login');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
+
+      window.dispatchEvent(new CustomEvent(AUTH_STATE_CHANGE_EVENT));
     }
 
     return Promise.reject(error);

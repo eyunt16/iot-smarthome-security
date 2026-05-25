@@ -46,6 +46,16 @@ async function seedSuperAdmin() {
 seedSuperAdmin()
   .catch((error) => {
     console.error('[SEED] Failed to seed SuperAdmin:', error);
+
+    const isLocalMongoRefused =
+      error?.name === 'MongooseServerSelectionError'
+      && String(process.env.MONGODB_URI || '').includes('127.0.0.1:27017');
+
+    if (isLocalMongoRefused) {
+      console.error('[SEED] No MongoDB server is reachable at 127.0.0.1:27017.');
+      console.error('[SEED] Best fix: either start MongoDB locally, start Docker Desktop and run `docker compose up -d mongo`, or change MONGODB_URI in backend/.env to your MongoDB Atlas connection string.');
+    }
+
     process.exitCode = 1;
   })
   .finally(async () => {

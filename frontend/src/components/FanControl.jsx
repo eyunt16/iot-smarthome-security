@@ -1,126 +1,120 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Fan } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useTheme } from '../contexts/DarkModeContext';
 
-export default function FanControl({ initialSpeed = 0, onSpeedChange, disabled = false }) {
-  const [speed, setSpeed] = useState(initialSpeed);
+export default function FanControl({
+  initialSpeed = 0,
+  onSpeedChange,
+  disabled = false,
+}) {
   const { isDark, colors } = useTheme();
+  const [isOn, setIsOn] = useState(initialSpeed > 0);
 
-  const handleSpeedChange = (e) => {
+  useEffect(() => {
+    setIsOn(initialSpeed > 0);
+  }, [initialSpeed]);
+
+  const handleToggle = () => {
     if (disabled) {
       return;
     }
 
-    const newSpeed = parseInt(e.target.value);
-    setSpeed(newSpeed);
-    if (onSpeedChange) onSpeedChange(newSpeed);
-  };
-
-  const getSpeedLabel = () => {
-    if (speed === 0) return 'OFF';
-    if (speed <= 33) return 'Low';
-    if (speed <= 66) return 'Medium';
-    return 'High';
-  };
-
-  const getIconStyle = () => {
-    if (speed === 0) return {
-      background: isDark ? '#5A5A5A' : '#9CA3AF',
-    };
-    if (speed <= 33) return {
-      background: `linear-gradient(135deg, ${colors.sliderBlue}, ${colors.sliderBlue}CC)`,
-      boxShadow: `0 4px 14px ${colors.sliderBlue}55`,
-    };
-    if (speed <= 66) return {
-      background: `linear-gradient(135deg, ${colors.sliderPurple}, ${colors.sliderPurple}CC)`,
-      boxShadow: `0 4px 14px ${colors.sliderPurple}55`,
-    };
-    return {
-      background: `linear-gradient(135deg, ${colors.sliderBlue}, ${colors.sliderPurple})`,
-      boxShadow: `0 4px 14px ${colors.sliderPurple}55`,
-    };
-  };
-
-  const getAccentColor = () => {
-    if (speed === 0) return '#9CA3AF';
-    if (speed <= 33) return colors.sliderBlue;
-    if (speed <= 66) return colors.sliderPurple;
-    return colors.sliderBlue;
+    const nextIsOn = !isOn;
+    setIsOn(nextIsOn);
+    onSpeedChange?.(nextIsOn ? 100 : 0);
   };
 
   return (
-    <motion.div 
-      className="p-6 rounded-2xl border transition-all duration-300"
+    <motion.div
+      className="rounded-2xl border p-6 transition-all duration-300"
       style={{
         backgroundColor: isDark ? colors.card : '#FFFFFF',
         borderColor: colors.border,
       }}
-      whileHover={{ y: -4, scale: 1.01, boxShadow: isDark
-        ? '0 12px 32px rgba(0,0,0,0.2)'
-        : '0 12px 32px rgba(155,124,84,0.1)' }}
+      whileHover={{
+        y: -4,
+        scale: 1.01,
+        boxShadow: isDark
+          ? '0 12px 32px rgba(0,0,0,0.2)'
+          : '0 12px 32px rgba(155,124,84,0.1)',
+      }}
       whileTap={{ scale: 0.98 }}
     >
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div 
-            className="p-3 rounded-full transition-all duration-300"
-            style={getIconStyle()}
+          <div
+            className={`rounded-full p-3 transition-all duration-300 ${
+              isOn
+                ? 'bg-gradient-to-br from-sky-500 to-cyan-400'
+                : isDark
+                  ? 'bg-stone-600'
+                  : 'bg-gray-400'
+            }`}
+            style={isOn ? { boxShadow: '0 0 22px rgba(56, 189, 248, 0.35)' } : {}}
           >
             <motion.div
-              animate={{ rotate: speed > 0 ? 360 : 0 }}
-              transition={{ duration: 0.8, repeat: speed > 0 ? Infinity : 0 }}
+              animate={{ rotate: isOn ? 360 : 0, opacity: isOn ? 1 : 0.55 }}
+              transition={{ duration: 0.9, repeat: isOn ? Infinity : 0, ease: 'linear' }}
             >
               <Fan size={24} className="text-white" />
             </motion.div>
           </div>
+
           <div>
-            <h3 
-              className="font-semibold transition-colors duration-300"
-              style={{ color: colors.text }}
-            >
+            <h3 className="font-semibold transition-colors duration-300" style={{ color: colors.text }}>
               Ceiling Fan
             </h3>
-            <p 
-              className="text-sm transition-colors duration-300"
-              style={{ color: colors.textSecondary }}
-            >
-              {getSpeedLabel()}
-            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <span
+                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold tracking-wide ${
+                  isOn
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-gray-200 text-gray-500'
+                }`}
+              >
+                {isOn ? 'ON' : 'OFF'}
+              </span>
+              <span className="text-sm transition-colors duration-300" style={{ color: colors.textSecondary }}>
+                Relay output
+              </span>
+            </div>
           </div>
         </div>
-        <span 
-          className="text-2xl font-bold transition-colors duration-300"
-          style={{ color: colors.text }}
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isOn}
+          aria-label="Toggle ceiling fan"
+          onClick={handleToggle}
+          disabled={disabled}
+          className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+            isOn ? 'justify-end' : 'justify-start'
+          }`}
+          style={{
+            backgroundColor: isOn ? (isDark ? colors.sliderBlue : '#0EA5E9') : (isDark ? '#5C4D42' : '#D1D5DB'),
+            borderColor: isOn ? 'transparent' : colors.border,
+            paddingInline: '4px',
+          }}
         >
-          {speed}%
+          <span className="h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-300" />
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between rounded-2xl px-4 py-3" style={{
+        backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#F8F6F0',
+      }}>
+        <span className="text-sm font-medium transition-colors duration-300" style={{ color: colors.textSecondary }}>
+          Device State
+        </span>
+        <span
+          className={`text-sm font-bold ${isOn ? 'text-emerald-500' : 'text-gray-400'}`}
+        >
+          {isOn ? 'ON' : 'OFF'}
         </span>
       </div>
 
-      <input
-        type="range"
-        min="0"
-        max="100"
-        value={speed}
-        onChange={handleSpeedChange}
-        disabled={disabled}
-        className="w-full h-2 rounded-lg appearance-none transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-60"
-        style={{
-          background: speed === 0
-            ? (isDark ? '#5A4730' : '#D1D5DB')
-            : `linear-gradient(to right, ${colors.sliderBlue}, ${colors.sliderPurple})`,
-          accentColor: getAccentColor(),
-        }}
-      />
-      <div 
-        className="flex justify-between text-xs mt-2 transition-colors duration-300"
-        style={{ color: colors.textSecondary }}
-      >
-        <span>Off</span>
-        <span>Low</span>
-        <span>Medium</span>
-        <span>High</span>
-      </div>
       {disabled && (
         <p
           className="mt-3 text-[11px] font-medium transition-colors duration-300"

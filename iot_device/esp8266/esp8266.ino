@@ -15,7 +15,7 @@
 // ==========================================================================================================
 // CONFIGURATION BLOCK
 // ==========================================================================================================
-const char* WIFI_SSID = "S-Home";
+const char* WIFI_SSID = "S-HOME";
 const char* WIFI_PASSWORD = "123456789a";
 
 const char* HIVEMQ_URL = "4d9428ecfbbe4084896b1c3a240cbe9e.s1.eu.hivemq.cloud";
@@ -173,6 +173,7 @@ void connectWiFi() {
   Serial.println(WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startMs = millis();
