@@ -13,6 +13,7 @@
  */
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Eye, EyeOff, Lock, Mail, Moon, ShieldCheck, Sun, UserCheck, UserPlus, User,
@@ -189,6 +190,7 @@ const slide = {
 
 // ── MAIN COMPONENT ────────────────────────────────────────────
 export default function Login({ onLoginSuccess }) {
+  const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
   const tok = isDark ? PALETTE.dark : PALETTE.light;
   const LOCKED_ACCOUNT_MESSAGE = '⚠️ Your account has been locked due to too many failed login attempts. Please contact the Administrator to unlock.';
@@ -229,6 +231,7 @@ export default function Login({ onLoginSuccess }) {
   };
 
   // ── Sign In submit ─────────────────────────────────────────
+  // ── Sign In submit ─────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
     clearAuthFeedback();
@@ -240,17 +243,20 @@ export default function Login({ onLoginSuccess }) {
         password,
       });
 
-      if (response?.status === 'success' && response?.token) {
+      // 🔥 FIX Ở ĐÂY: Bỏ check chữ 'success', chỉ cần có token là mở cửa!
+      if (response?.token) {
         saveAuthSession({
           token: response.token,
-          user: response.user,
+          user: response.user || { username: username.trim() },
         });
         onLoginSuccess?.(response.user);
+        navigate('/', { replace: true });
         return;
       }
 
       setError(response?.message || INVALID_CREDENTIALS_MESSAGE);
     } catch (error) {
+      // ĐÂY LÀ PHẦN CATCH CỦA BẠN NÈ
       const responseData = error?.response?.data || error?.data || null;
       const responseMessage = String(responseData?.message || error?.message || '');
       const normalizedMessage = responseMessage.toLowerCase();

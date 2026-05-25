@@ -1,15 +1,11 @@
 import mqtt from 'mqtt';
 
-const MQTT_URL = 'ws://test.mosquitto.org:8080/mqtt'; // Websocket port for test.mosquitto.org
+// 1. CHỈNH LẠI ĐÚNG ĐÀI PHÁT THANH HIVEMQ CỦA BẠN (Dùng WSS và Port 8884 cho Frontend)
+const MQTT_URL = 'wss://4d9428ecfbbe4084896b1c3a240cbe9e.s1.eu.hivemq.cloud:8884/mqtt'; 
+
+// 2. CHỈNH LẠI TOPIC ĐỂ HỨNG DATA CỦA TẤT CẢ CÁC PHÒNG (Dùng Wildcard #)
 const SENSOR_TOPICS = [
-  'home/temperature',
-  'home/humidity',
-  'home/motion',
-  'home/device/light',
-  'home/device/fan',
-  'home/device/servo',
-  'home/device/dc',
-  'home/device/stepper'
+  'tuyenhome/env/#'
 ];
 
 class MQTTService {
@@ -23,15 +19,18 @@ class MQTTService {
   connect() {
     if (this.client) return;
 
+    // 3. THÊM TÀI KHOẢN MẬT KHẨU HIVEMQ VÀO ĐÂY
     this.client = mqtt.connect(MQTT_URL, {
       clientId: `web_client_${Math.random().toString(16).slice(3)}`,
+      username: 'Tuyen',
+      password: '123456789tT',
       clean: true,
       reconnectPeriod: 1000,
     });
 
     this.client.on('connect', () => {
       this.isClientConnected = true;
-      console.log('Connected to MQTT Broker via WebSocket');
+      console.log('✅ Đã kết nối thành công tới HiveMQ Broker qua WebSocket');
       SENSOR_TOPICS.forEach((topic) => {
         this.client.subscribe(topic);
       });
@@ -40,13 +39,18 @@ class MQTTService {
 
     this.client.on('message', (topic, message) => {
       const payload = message.toString();
+      // Bắn data về cho các component đang lắng nghe
       if (this.callbacks[topic]) {
         this.callbacks[topic].forEach((cb) => cb(payload));
+      }
+      // Vì dùng wildcard 'tuyenhome/env/#', ta kích hoạt luôn callback cho wildcard nếu component có đăng ký
+      if (this.callbacks['tuyenhome/env/#']) {
+         this.callbacks['tuyenhome/env/#'].forEach((cb) => cb({ topic, payload }));
       }
     });
 
     this.client.on('error', (err) => {
-      console.error('MQTT Error:', err);
+      console.error('❌ MQTT Error:', err);
     });
 
     this.client.on('reconnect', () => {

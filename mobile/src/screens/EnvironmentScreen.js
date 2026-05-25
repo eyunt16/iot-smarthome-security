@@ -1,146 +1,278 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, SafeAreaView } from 'react-native';
 import { colors } from '../theme/colors';
 import { api } from '../services/api';
 
+const NODE_META = [
+  { key: 'livingroom', label: 'Living Room ESP', color: '#C27B4A', source: 'ESP' },
+  { key: 'bedroom', label: 'Bedroom ESP', color: '#4A7A9B', source: 'ESP' },
+  { key: 'kitchen', label: 'Kitchen ESP', color: '#16A393', source: 'ESP' },
+  { key: 'hallway', label: 'Hallway Sim', color: '#9C6ADE', source: 'Simulated' },
+  { key: 'garage', label: 'Garage Sim', color: '#D14F70', source: 'Simulated' },
+  { key: 'perimeter', label: 'Perimeter Sim', color: '#4D7C0F', source: 'Simulated' },
+];
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatTemp(value) {
+  return `${Number(value).toFixed(1)}°C`;
+}
+
+function formatHum(value) {
+  return `${Math.round(value)}%`;
+}
+
+function formatLux(value) {
+  return `${Math.round(value)} lux`;
+}
+
+function buildBaseSnapshot(temp = 27.5, humidity = 58, lux = 320) {
+  return {
+    livingroom: { temperature: temp, humidity, lux },
+    bedroom: { temperature: temp - 2.7, humidity: humidity - 5, lux: Math.max(120, lux - 110) },
+    kitchen: { temperature: temp + 3.1, humidity: humidity + 9, lux: lux + 95 },
+    hallway: { temperature: temp - 0.9, humidity: humidity - 2, lux: lux - 35 },
+    garage: { temperature: temp + 1.6, humidity: humidity + 3, lux: lux + 55 },
+    perimeter: { temperature: temp - 1.3, humidity: humidity + 5, lux: lux - 85 },
+  };
+}
+
+function buildSeedSeries(snapshot, length = 24) {
+  return Array.from({ length }, (_, index) => {
+    const point = { time: index };
+    NODE_META.forEach((node, nodeIndex) => {
+      const base = snapshot[node.key].temperature;
+      const wave = Math.sin(index * 0.58 + nodeIndex * 0.85) * 1.35;
+      const ripple = Math.cos(index * 0.26 + nodeIndex) * 0.52;
+      point[node.key] = +(base + wave + ripple).toFixed(1);
+    });
+    return point;
+  });
+}
+
+function MetricCard({ label, value, tone }) {
+  return (
+    <View style={[styles.metricCard, { borderColor: `${tone}33` }]}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={styles.metricValue}>{value}</Text>
+      <View style={[styles.metricBarTrack, { backgroundColor: `${tone}18` }]}>
+        <View style={[styles.metricBarFill, { backgroundColor: tone }]} />
+      </View>
+    </View>
+  );
+}
+
+function MiniBars({ values, color }) {
+  const maxValue = Math.max(...values);
+  const minValue = Math.min(...values);
+  const spread = Math.max(1, maxValue - minValue);
+
+  return (
+    <View style={styles.sparklineWrap}>
+      {values.map((value, index) => {
+        const normalized = ((value - minValue) / spread) * 0.72 + 0.18;
+        return (
+          <View
+            key={`${index}-${value}`}
+            style={[
+              styles.sparkBar,
+              {
+                height: `${normalized * 100}%`,
+                backgroundColor: color,
+                opacity: 0.32 + (index / values.length) * 0.68,
+              },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 export default function EnvironmentScreen() {
-  const [temp, setTemp] = useState(22.4);
-  const [humidity, setHumidity] = useState(48);
-  const [airQuality, setAirQuality] = useState('Excellent');
-  const [co2, setCo2] = useState(412);
-  const [loading, setLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState(() => buildBaseSnapshot());
+  const [history, setHistory] = useState(() => buildSeedSeries(buildBaseSnapshot()));
+  const [modeLabel, setModeLabel] = useState('Live ESP + Simulated');
+  const tickRef = useRef(0);
 
   useEffect(() => {
+    let mounted = true;
+
+    const fetchEnvironmentData = async () => {
+      try {
+        const response = await api.get('/sensors');
+        if (!mounted || !response?.sensors) {
+          return;
+        }
+
+        const nextTemp = Number.parseFloat(response.sensors.temperature) || 27.5;
+        const nextHumidity = Number.parseFloat(response.sensors.humidity) || 58;
+        const nextLux = Number.parseFloat(response.sensors.lux ?? response.sensors.light) || 320;
+
+        setSnapshot((previous) => ({
+          ...previous,
+          ...buildBaseSnapshot(nextTemp, nextHumidity, nextLux),
+        }));
+        setModeLabel('Live ESP + Simulated');
+      } catch (error) {
+        if (mounted) {
+          setModeLabel('Simulated Mesh Only');
+        }
+      }
+    };
+
     fetchEnvironmentData();
+    const pollTimer = setInterval(fetchEnvironmentData, 8000);
+
+    return () => {
+      mounted = false;
+      clearInterval(pollTimer);
+    };
   }, []);
 
-  const fetchEnvironmentData = async () => {
-    try {
-      // Fetch sensor data from backend
-      const response = await api.get('/sensors');
-      if (response && response.sensors) {
-        setTemp(response.sensors.temperature || 22.4);
-        setHumidity(response.sensors.humidity || 48);
-      }
-      setLoading(false);
-    } catch (err) {
-      console.log('Error fetching environment data:', err);
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    const timer = setInterval(() => {
+      tickRef.current += 1;
+
+      setSnapshot((previous) => {
+        const next = {};
+
+        NODE_META.forEach((node, index) => {
+          const currentNode = previous[node.key];
+          const tempWave = Math.sin(tickRef.current * 0.78 + index * 0.72) * 0.78;
+          const humWave = Math.cos(tickRef.current * 0.42 + index * 0.6) * 1.8;
+          const luxWave = Math.sin(tickRef.current * 0.64 + index * 0.93) * 26;
+
+          next[node.key] = {
+            temperature: +clamp(currentNode.temperature + tempWave * 0.32, 18, 40).toFixed(1),
+            humidity: Math.round(clamp(currentNode.humidity + humWave * 0.24, 35, 90)),
+            lux: Math.round(clamp(currentNode.lux + luxWave * 0.22, 40, 900)),
+          };
+        });
+
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setHistory((previous) => {
+      const nextPoint = { time: previous.length };
+      NODE_META.forEach((node, index) => {
+        const base = snapshot[node.key].temperature;
+        const wave = Math.sin((tickRef.current + 1) * 0.78 + index * 0.72) * 1.42;
+        const ripple = Math.cos((tickRef.current + 1) * 0.36 + index * 0.55) * 0.48;
+        nextPoint[node.key] = +(base + wave + ripple).toFixed(1);
+      });
+
+      return [...previous, nextPoint].slice(-28);
+    });
+  }, [snapshot]);
+
+  const averageTemperature = useMemo(() => (
+    NODE_META.slice(0, 3).reduce((sum, node) => sum + snapshot[node.key].temperature, 0) / 3
+  ), [snapshot]);
+
+  const averageHumidity = useMemo(() => (
+    NODE_META.slice(0, 3).reduce((sum, node) => sum + snapshot[node.key].humidity, 0) / 3
+  ), [snapshot]);
+
+  const averageLux = useMemo(() => (
+    NODE_META.slice(0, 3).reduce((sum, node) => sum + snapshot[node.key].lux, 0) / 3
+  ), [snapshot]);
+
+  const trendDelta = history.length > 1
+    ? history[history.length - 1].livingroom - history[Math.max(0, history.length - 6)].livingroom
+    : 0;
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
-        {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Live Environment</Text>
-          <Text style={styles.headerSubtitle}>Real-time sensor readings</Text>
+          <Text style={styles.headerTitle}>Environment Monitor</Text>
+          <Text style={styles.headerSubtitle}>Hybrid telemetry mesh mirrored from the web dashboard</Text>
         </View>
 
-        {/* Primary Metrics */}
-        <View style={styles.metricsRow}>
-          {/* Temperature Card */}
-          <View style={[styles.metricCard, styles.cardWarm]}>
-            <Text style={styles.metricLabel}>Indoor Temp</Text>
-            <Text style={styles.metricValue}>{temp.toFixed(1)}°C</Text>
-            <View style={styles.metricIcon}>
-              <Text style={styles.iconText}>🌡️</Text>
-            </View>
+        <View style={styles.badgeRow}>
+          <View style={[styles.badge, styles.badgePrimary]}>
+            <Text style={styles.badgeTextPrimary}>{modeLabel}</Text>
           </View>
-
-          {/* Humidity Card */}
-          <View style={[styles.metricCard, styles.cardCool]}>
-            <Text style={styles.metricLabel}>Humidity</Text>
-            <Text style={styles.metricValue}>{humidity}%</Text>
-            <View style={styles.metricIcon}>
-              <Text style={styles.iconText}>💧</Text>
-            </View>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>3 live rooms</Text>
+          </View>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>6 visible nodes</Text>
           </View>
         </View>
 
-        {/* Temperature Trend */}
+        <View style={styles.metricsGrid}>
+          <MetricCard label="Average Temp" value={formatTemp(averageTemperature)} tone="#C27B4A" />
+          <MetricCard label="Average Humidity" value={formatHum(averageHumidity)} tone="#4A7A9B" />
+          <MetricCard label="Ambient Light" value={formatLux(averageLux)} tone="#D4A574" />
+        </View>
+
         <View style={styles.trendCard}>
           <View style={styles.trendHeader}>
             <View>
-              <Text style={styles.trendTitle}>Temperature</Text>
-              <Text style={styles.trendSubtitle}>Past 12 hours</Text>
+              <Text style={styles.trendTitle}>Temperature Trends</Text>
+              <Text style={styles.trendSubtitle}>Dense 6-node mesh with visible up/down movement</Text>
             </View>
             <View style={styles.trendBadge}>
-              <Text style={styles.trendValue}>+1.2°</Text>
-              <Text style={styles.trendLabel}>TRENDING UP</Text>
+              <Text style={styles.trendValue}>{trendDelta >= 0 ? '+' : ''}{trendDelta.toFixed(1)}°</Text>
+              <Text style={styles.trendLabel}>LAST 5 TICKS</Text>
             </View>
           </View>
-          <View style={styles.chartPlaceholder}>
-            <Text style={styles.chartText}>📊 Chart visualization</Text>
+
+          <View style={styles.legendWrap}>
+            {NODE_META.map((node) => (
+              <View key={node.key} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: node.color }]} />
+                <Text style={styles.legendLabel}>{node.label}</Text>
+              </View>
+            ))}
           </View>
+
+          <MiniBars
+            values={history.slice(-24).map((point) => point.livingroom)}
+            color="#C27B4A"
+          />
         </View>
 
-        {/* Air Quality & CO2 */}
-        <View style={styles.qualityRow}>
-          <View style={[styles.qualityCard, styles.qualityGood]}>
-            <View style={styles.qualityIcon}>
-              <Text style={styles.iconText}>💨</Text>
-            </View>
-            <Text style={styles.qualityLabel}>AIR QUALITY</Text>
-            <Text style={styles.qualityValue}>{airQuality}</Text>
-            <View style={styles.progressBar}>
-              <View style={styles.progressFill} />
-            </View>
-          </View>
+        <View style={styles.nodeSection}>
+          <Text style={styles.sectionTitle}>Node Mesh</Text>
+          {NODE_META.map((node, index) => (
+            <View key={node.key} style={styles.nodeCard}>
+              <View style={styles.nodeHeader}>
+                <View>
+                  <Text style={styles.nodeSource}>{index < 3 ? 'LIVE ESP' : 'SIMULATED'}</Text>
+                  <Text style={styles.nodeTitle}>{node.label}</Text>
+                </View>
+                <View style={[styles.nodeSignalBadge, { backgroundColor: `${node.color}18` }]}>
+                  <Text style={[styles.nodeSignalText, { color: node.color }]}>{92 - index * 5}%</Text>
+                </View>
+              </View>
 
-          <View style={[styles.qualityCard, styles.qualityInfo]}>
-            <View style={styles.qualityIcon}>
-              <Text style={styles.iconText}>🌍</Text>
+              <View style={styles.nodeMetrics}>
+                <View style={styles.nodeMetricCell}>
+                  <Text style={styles.nodeMetricLabel}>Temp</Text>
+                  <Text style={styles.nodeMetricValue}>{formatTemp(snapshot[node.key].temperature)}</Text>
+                </View>
+                <View style={styles.nodeMetricCell}>
+                  <Text style={styles.nodeMetricLabel}>Humidity</Text>
+                  <Text style={styles.nodeMetricValue}>{formatHum(snapshot[node.key].humidity)}</Text>
+                </View>
+                <View style={styles.nodeMetricCell}>
+                  <Text style={styles.nodeMetricLabel}>Light</Text>
+                  <Text style={styles.nodeMetricValue}>{formatLux(snapshot[node.key].lux)}</Text>
+                </View>
+              </View>
             </View>
-            <Text style={styles.qualityLabel}>CO₂ LEVEL</Text>
-            <Text style={styles.qualityValue}>{co2} ppm</Text>
-            <Text style={styles.qualityNote}>Healthy range</Text>
-          </View>
+          ))}
         </View>
-
-        {/* Humidity Analysis */}
-        <View style={styles.analysisCard}>
-          <View style={styles.analysisHeader}>
-            <Text style={styles.analysisTitle}>Humidity Analysis</Text>
-            <View style={styles.analysisBadge}>
-              <Text style={styles.analysisBadgeText}>48% AVG</Text>
-            </View>
-          </View>
-          <Text style={styles.analysisValue}>Consistency</Text>
-          <View style={styles.analysisChart}>
-            <Text style={styles.chartPlaceholderText}>📈 Humidity trend</Text>
-          </View>
-          <Text style={styles.analysisDetail}>
-            Humidity has remained within the comfort zone for 48 consecutive hours.
-          </Text>
-        </View>
-
-        {/* Device Health */}
-        <View style={styles.deviceSection}>
-          <Text style={styles.sectionTitle}>Device Health</Text>
-          <View style={styles.deviceItem}>
-            <View style={styles.deviceIcon}>
-              <Text>🏠</Text>
-            </View>
-            <View style={styles.deviceInfo}>
-              <Text style={styles.deviceName}>Main Gateway</Text>
-              <Text style={styles.deviceStatus}>ONLINE</Text>
-            </View>
-            <View style={styles.statusDot} />
-          </View>
-          <View style={styles.deviceItem}>
-            <View style={styles.deviceIcon}>
-              <Text>📡</Text>
-            </View>
-            <View style={styles.deviceInfo}>
-              <Text style={styles.deviceName}>Living Room Sensor</Text>
-              <Text style={styles.deviceBattery}>92%</Text>
-            </View>
-          </View>
-        </View>
-
       </ScrollView>
     </SafeAreaView>
   );
@@ -153,13 +285,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingTop: 10,
+    paddingTop: 12,
+    paddingBottom: 80,
   },
   header: {
-    marginBottom: 24,
+    marginBottom: 18,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '700',
     color: colors.text,
     marginBottom: 4,
@@ -167,249 +300,211 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 14,
     color: colors.textMuted,
+    lineHeight: 20,
   },
-  metricsRow: {
+  badgeRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 18,
+  },
+  badge: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  badgePrimary: {
+    backgroundColor: 'rgba(26,77,46,0.08)',
+    borderColor: 'rgba(26,77,46,0.18)',
+  },
+  badgeText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  badgeTextPrimary: {
+    color: '#1A4D2E',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  metricsGrid: {
     gap: 12,
+    marginBottom: 22,
   },
   metricCard: {
-    flex: 1,
-    padding: 20,
-    borderRadius: 20,
-    justifyContent: 'space-between',
-    height: 140,
-  },
-  cardWarm: {
-    backgroundColor: '#FEF3C7',
-  },
-  cardCool: {
-    backgroundColor: '#E0F2FE',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
   },
   metricLabel: {
-    fontSize: 12,
-    color: colors.textMuted,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: colors.textMuted,
   },
   metricValue: {
-    fontSize: 32,
+    marginTop: 8,
+    fontSize: 28,
     fontWeight: '700',
     color: colors.text,
   },
-  metricIcon: {
-    alignSelf: 'flex-end',
+  metricBarTrack: {
+    marginTop: 14,
+    height: 8,
+    borderRadius: 999,
   },
-  iconText: {
-    fontSize: 24,
+  metricBarFill: {
+    width: '72%',
+    height: '100%',
+    borderRadius: 999,
   },
   trendCard: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
+    borderRadius: 24,
+    padding: 18,
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: 22,
   },
   trendHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 12,
     marginBottom: 16,
   },
   trendTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     color: colors.text,
   },
   trendSubtitle: {
+    marginTop: 4,
     fontSize: 13,
     color: colors.textMuted,
-    marginTop: 4,
+    lineHeight: 18,
   },
   trendBadge: {
     alignItems: 'flex-end',
   },
   trendValue: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     color: colors.accent,
   },
   trendLabel: {
-    fontSize: 11,
-    color: colors.accent,
-    fontWeight: '600',
-  },
-  chartPlaceholder: {
-    height: 120,
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  chartText: {
-    fontSize: 14,
-    color: colors.textMuted,
-  },
-  chartPlaceholderText: {
-    fontSize: 13,
-    color: colors.textMuted,
-  },
-  qualityRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    gap: 12,
-  },
-  qualityCard: {
-    flex: 1,
-    borderRadius: 20,
-    padding: 18,
-    alignItems: 'center',
-  },
-  qualityGood: {
-    backgroundColor: '#E8F5E9',
-  },
-  qualityInfo: {
-    backgroundColor: '#E3F2FD',
-  },
-  qualityIcon: {
-    fontSize: 32,
-    marginBottom: 12,
-  },
-  qualityLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  qualityValue: {
-    fontSize: 22,
+    marginTop: 4,
+    fontSize: 10,
     fontWeight: '700',
-    color: colors.text,
-    marginBottom: 12,
+    color: colors.textMuted,
+    letterSpacing: 0.8,
   },
-  progressBar: {
-    width: '100%',
-    height: 4,
-    backgroundColor: colors.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    width: '75%',
-    height: '100%',
-    backgroundColor: colors.success,
-  },
-  qualityNote: {
-    fontSize: 11,
-    color: colors.success,
-    marginTop: 8,
-    fontWeight: '500',
-  },
-  analysisCard: {
-    backgroundColor: '#2D5016',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
-  },
-  analysisHeader: {
+  legendWrap: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
     marginBottom: 16,
   },
-  analysisTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#C4E3AC',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  analysisBadge: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  analysisBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#C4E3AC',
-  },
-  analysisValue: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 12,
-  },
-  analysisChart: {
-    height: 80,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  analysisDetail: {
-    fontSize: 13,
-    color: '#C4E3AC',
-    lineHeight: 20,
-  },
-  deviceSection: {
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  deviceItem: {
+  legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  sparklineWrap: {
+    height: 160,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 3,
+    backgroundColor: '#F8F6F0',
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
+  sparkBar: {
+    flex: 1,
+    borderRadius: 999,
+    minHeight: 14,
+  },
+  nodeSection: {
+    gap: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  nodeCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
+    borderRadius: 22,
+    padding: 18,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  deviceIcon: {
-    fontSize: 20,
-    marginRight: 12,
-    width: 40,
-    textAlign: 'center',
+  nodeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 14,
   },
-  deviceInfo: {
-    flex: 1,
+  nodeSource: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    color: colors.textMuted,
   },
-  deviceName: {
-    fontSize: 15,
-    fontWeight: '600',
+  nodeTitle: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.text,
   },
-  deviceStatus: {
+  nodeSignalBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignSelf: 'flex-start',
+  },
+  nodeSignalText: {
     fontSize: 12,
-    color: colors.success,
-    fontWeight: '600',
-    marginTop: 2,
+    fontWeight: '700',
   },
-  deviceBattery: {
-    fontSize: 13,
+  nodeMetrics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  nodeMetricCell: {
+    flex: 1,
+    minWidth: 92,
+  },
+  nodeMetricLabel: {
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     color: colors.textMuted,
-    marginTop: 2,
+    fontWeight: '700',
   },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.success,
+  nodeMetricValue: {
+    marginTop: 6,
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
   },
 });

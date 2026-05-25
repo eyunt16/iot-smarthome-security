@@ -99,6 +99,7 @@ function SectionHeader({ icon: Icon, title, subtitle }) {
 const SAFE_SENSOR = {
   temperature: { current: '--', history: [] },
   humidity:    { current: '--', history: [] },
+  light:       { current: '--', history: [] },
   motion:      { current: false, lastEvent: null, alertCount: 0 },
 };
 
@@ -669,7 +670,7 @@ export default function Dashboard({
   const safeData    = sensorData    ?? SAFE_SENSOR;
   const safeDevices = deviceStates  ?? SAFE_DEVICES;
 
-  const { temperature, humidity, motion: pir } = safeData;  // renamed: avoids shadowing framer-motion's `motion`
+  const { temperature, humidity, light: lightSensor, motion: pir } = safeData;  // renamed: avoids shadowing framer-motion's `motion`
   const { light, fan }                         = safeDevices;
 
   // Guard: show skeleton until at least temperature is a real number
@@ -895,7 +896,7 @@ export default function Dashboard({
           <SectionHeader
             icon={Thermometer}
             title="Multi-Room History Chart"
-            subtitle="Temperature and Humidity trends — Last 20 readings (5s intervals)"
+            subtitle="Temperature trends — Last 20 readings (5s intervals)"
           />
           <div
             className="rounded-3xl border p-6 transition-all duration-300"
@@ -906,7 +907,10 @@ export default function Dashboard({
           >
             <div className="h-80 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartHistory} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <AreaChart 
+                  data={chartHistory} 
+                  margin={{ top: 10, right: 30, left: 0, bottom: 50 }}
+                >
                   <defs>
                     <linearGradient id="gradLR" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#B8860B" stopOpacity={0.4} />
@@ -921,6 +925,16 @@ export default function Dashboard({
                       <stop offset="95%" stopColor="#A0522D" stopOpacity={0} />
                     </linearGradient>
                   </defs>
+                  
+                  <XAxis 
+                    dataKey="time" 
+                    stroke={colors.textSecondary}
+                    style={{ fontSize: 10 }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  
                   <Tooltip
                     contentStyle={{
                       background: chartColors.tooltipBg,
@@ -930,50 +944,82 @@ export default function Dashboard({
                       color: colors.text,
                       padding: '8px 12px',
                     }}
-                    formatter={(value) => value.toFixed(1)}
+                    formatter={(value) => [`${value.toFixed(1)}°C`, '']}
+                    labelStyle={{ color: colors.text }}
                   />
+                  
+                  <Legend 
+                    wrapperStyle={{ paddingTop: '20px' }}
+                    textColor={colors.text}
+                  />
+                  
+                  {/* Living Room Temperature (Amber) */}
                   <Area
                     type="monotone"
                     dataKey="livingRoomTemp"
                     stroke="#B8860B"
                     fill="url(#gradLR)"
-                    name="Living Room Temp (°C)"
-                    strokeWidth={2}
+                    name="Living Room (°C)"
+                    strokeWidth={2.5}
                     dot={false}
+                    isAnimationActive={true}
                   />
+                  
+                  {/* Bedroom Temperature (Green) */}
                   <Area
                     type="monotone"
                     dataKey="bedroomTemp"
                     stroke="#228B22"
                     fill="url(#gradBR)"
-                    name="Bedroom Temp (°C)"
-                    strokeWidth={2}
+                    name="Bedroom (°C)"
+                    strokeWidth={2.5}
                     dot={false}
+                    isAnimationActive={true}
                   />
+                  
+                  {/* Kitchen Temperature (Rust) */}
                   <Area
                     type="monotone"
                     dataKey="kitchenTemp"
                     stroke="#A0522D"
                     fill="url(#gradKT)"
-                    name="Kitchen Temp (°C)"
-                    strokeWidth={2}
+                    name="Kitchen (°C)"
+                    strokeWidth={2.5}
                     dot={false}
+                    isAnimationActive={true}
                   />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="mt-4 grid grid-cols-3 gap-3 text-[11px]">
-              <div className="flex items-center gap-2">
+            
+            {/* Color Legend */}
+            <div className="mt-6 grid grid-cols-3 gap-4 text-[11px]">
+              <div className="flex items-center gap-2.5">
                 <span className="h-3 w-3 rounded-full" style={{ backgroundColor: '#B8860B' }} />
-                <span style={{ color: colors.textSecondary }}>Living Room</span>
+                <div>
+                  <p className="font-semibold" style={{ color: colors.text }}>Living Room</p>
+                  <p style={{ color: colors.textSecondary }}>
+                    {allRoomsData?.livingroom?.temperature?.toFixed(1) || '--'}°C
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <span className="h-3 w-3 rounded-full" style={{ backgroundColor: '#228B22' }} />
-                <span style={{ color: colors.textSecondary }}>Bedroom</span>
+                <div>
+                  <p className="font-semibold" style={{ color: colors.text }}>Bedroom</p>
+                  <p style={{ color: colors.textSecondary }}>
+                    {allRoomsData?.bedroom?.temperature?.toFixed(1) || '--'}°C
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <span className="h-3 w-3 rounded-full" style={{ backgroundColor: '#A0522D' }} />
-                <span style={{ color: colors.textSecondary }}>Kitchen</span>
+                <div>
+                  <p className="font-semibold" style={{ color: colors.text }}>Kitchen</p>
+                  <p style={{ color: colors.textSecondary }}>
+                    {allRoomsData?.kitchen?.temperature?.toFixed(1) || '--'}°C
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -985,9 +1031,9 @@ export default function Dashboard({
         <SectionHeader
           icon={Thermometer}
           title="Live Sensor Readings"
-          subtitle="DHT11 · ESP32 · Updates every 3 s"
+          subtitle="Real-time sensor metrics from IoT devices"
         />
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
 
           {/* Temperature */}
           <LiveSensorWidget
@@ -1013,6 +1059,19 @@ export default function Dashboard({
             history={humidity.history}
             glowDuration="1.2s"
             animClass="animate-glow-cool"
+          />
+
+          {/* Light Sensor */}
+          <LiveSensorWidget
+            icon={Lightbulb}
+            label="Light"
+            value={lightSensor?.current || 0}
+            unit="lux"
+            accentLight="#D4A574"
+            accentDark="#E5D4B8"
+            history={lightSensor?.history || []}
+            glowDuration="1.5s"
+            animClass="animate-glow-warm"
           />
 
           {/* PIR Motion — binary widget, no sparkline */}

@@ -1,218 +1,330 @@
-/**
- * useMQTT.js — MQTT Abstraction Hook
- *
- * Currently runs a realistic mock simulation.
- * To connect to your real HiveMQ broker, replace the startSimulation()
- * block with the commented "REAL BROKER" section below.
- *
- * ══════════════════════════════════════════════════════════════
- * REAL BROKER (swap-in when ready):
- *
- *   import mqtt from 'mqtt';
- *
- *   const client = mqtt.connect('wss://YOUR_BROKER.s1.eu.hivemq.cloud:8884/mqtt', {
- *     username: 'YOUR_USERNAME',
- *     password: 'YOUR_PASSWORD',
- *     protocol: 'wss',
- *     keepalive: 60,
- *   });
- *
- *   client.on('connect', () => setIsConnected(true));
- *   client.on('close',   () => setIsConnected(false));
- *
- *   client.subscribe(['home/temperature', 'home/humidity', 'home/motion']);
- *
- *   client.on('message', (topic, payload) => {
- *     const val = payload.toString();
- *     if (topic === 'home/temperature') setSensorData(p => ({ ...p, temperature: { ...p.temperature, current: +val } }));
- *     if (topic === 'home/humidity')    setSensorData(p => ({ ...p, humidity:    { ...p.humidity,    current: +val } }));
- *     if (topic === 'home/motion')      setSensorData(p => ({ ...p, motion:      { ...p.motion,      current: val === '1' } }));
- *     setLastUpdate(new Date());
- *   });
- *
- *   return () => client.end();
- * ══════════════════════════════════════════════════════════════
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import mqtt from 'mqtt';
 
-// ── Constants ─────────────────────────────────────────────────
-const HISTORY_POINTS   = 24;         // rolling window size
-const UPDATE_INTERVAL  = 3000;       // ms between simulated ticks
-const MOTION_CHANCE    = 0.07;       // 7% probability per tick
+const HISTORY_POINTS = 24;
+const UPDATE_INTERVAL = 3000;
+const MOTION_CHANCE = 0.07;
+const ROOM_TOPIC = 'tuyenhome/env/#';
+const REALTIME_STALE_MS = 12000;
+const TARGET_BLEND = 0.38;
+const ROOM_KEYS = ['livingroom', 'bedroom', 'kitchen'];
+const ROOM_DEFAULTS = {
+  livingroom: { temperature: 27.5, humidity: 60, lux: 320 },
+  bedroom: { temperature: 24.0, humidity: 55, lux: 180 },
+  kitchen: { temperature: 31.2, humidity: 70, lux: 420 },
+};
 
-// ── Helpers ───────────────────────────────────────────────────
-function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
-function timeLabel() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function timeLabel(withSeconds = false) {
+  return new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' } : {}),
+  });
 }
 
 function buildHistory(base, spread, points = HISTORY_POINTS) {
   const now = Date.now();
-  return Array.from({ length: points }, (_, i) => {
-    const t = new Date(now - (points - i) * UPDATE_INTERVAL);
+  return Array.from({ length: points }, (_, index) => {
+    const time = new Date(now - (points - index) * UPDATE_INTERVAL);
     return {
-      time:  t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       value: +(base + (Math.random() - 0.5) * spread).toFixed(1),
     };
   });
 }
 
-// ── Hook ──────────────────────────────────────────────────────
+function toNumber(value, fallback) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function createRoomsSnapshot() {
+  return {
+    livingroom: { ...ROOM_DEFAULTS.livingroom },
+    bedroom: { ...ROOM_DEFAULTS.bedroom },
+    kitchen: { ...ROOM_DEFAULTS.kitchen },
+  };
+}
+
+function average(values, fallback = 0) {
+  const validValues = values.filter((value) => Number.isFinite(value));
+  if (validValues.length === 0) {
+    return fallback;
+  }
+
+  return validValues.reduce((sum, value) => sum + value, 0) / validValues.length;
+}
+
+function appendHistory(history, value) {
+  return [...history.slice(-(HISTORY_POINTS - 1)), { time: timeLabel(), value }];
+}
+
+function stepToward(currentValue, targetValue, jitter, min, max, decimals = 1) {
+  const nextValue = currentValue + (targetValue - currentValue) * TARGET_BLEND + (Math.random() - 0.5) * jitter;
+  return +clamp(nextValue, min, max).toFixed(decimals);
+}
+
+function stepHumidity(currentValue, targetValue) {
+  const nextValue = currentValue + (targetValue - currentValue) * TARGET_BLEND + (Math.random() - 0.5) * 3.2;
+  return Math.round(clamp(nextValue, 30, 95));
+}
+
+function stepLux(currentValue, targetValue) {
+  const nextValue = currentValue + (targetValue - currentValue) * 0.42 + (Math.random() - 0.5) * 48;
+  return Math.round(clamp(nextValue, 30, 900));
+}
+
 export function useMQTT() {
   const [isConnected, setIsConnected] = useState(false);
-  const [lastUpdate,  setLastUpdate]  = useState(null);
-
-  const [allRoomsData, setAllRoomsData] = useState({
-    livingroom: { temperature: 27.5, humidity: 60 },
-    bedroom: { temperature: 24.0, humidity: 55 },
-    kitchen: { temperature: 31.2, humidity: 70 }
-  });
-
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [allRoomsData, setAllRoomsData] = useState(() => createRoomsSnapshot());
   const [sensorData, setSensorData] = useState(() => ({
     temperature: { current: 27.4, history: buildHistory(27, 4) },
-    humidity:    { current: 58,   history: buildHistory(58, 10) },
-    motion:      { current: false, lastEvent: null, alertCount: 0 },
+    humidity: { current: 58, history: buildHistory(58, 10) },
+    light: { current: 320, history: buildHistory(320, 140) },
+    motion: { current: false, lastEvent: null, alertCount: 0 },
   }));
-
   const [deviceStates, setDeviceStates] = useState({
     light: { on: false, brightness: 0 },
     fan: { on: false, speed: 0 },
   });
-
   const [commandLog, setCommandLog] = useState([]);
 
-  // ── Logging helper ─────────────────────────────────────────
+  const timerRef = useRef(null);
+  const simulatedRoomsRef = useRef(createRoomsSnapshot());
+  const realtimeRoomsRef = useRef(createRoomsSnapshot());
+  const roomRealtimeRef = useRef({
+    livingroom: 0,
+    bedroom: 0,
+    kitchen: 0,
+  });
+  const listenersRef = useRef({});
+
   const addLog = useCallback((topic, payload, type = 'receive') => {
-    setCommandLog(prev => [{
-      id:      Date.now() + Math.random(),
-      time:    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      topic,
-      payload: String(payload),
-      type,    // 'receive' | 'publish' | 'system' | 'alert'
-    }, ...prev.slice(0, 49)]);
+    setCommandLog((prev) => [
+      {
+        id: Date.now() + Math.random(),
+        time: timeLabel(true),
+        topic,
+        payload: String(payload),
+        type,
+      },
+      ...prev.slice(0, 49),
+    ]);
   }, []);
 
-  // ── Simulation ─────────────────────────────────────────────
-  const timerRef = useRef(null);
+  const updateLegacySensorSnapshot = useCallback((rooms, previousSensorState) => {
+    const temperatures = ROOM_KEYS.map((roomKey) => toNumber(rooms[roomKey]?.temperature, NaN));
+    const humidities = ROOM_KEYS.map((roomKey) => toNumber(rooms[roomKey]?.humidity, NaN));
+    const luxReadings = ROOM_KEYS.map((roomKey) => toNumber(rooms[roomKey]?.lux, NaN));
+    const avgTemp = +average(temperatures, previousSensorState.temperature.current || 0).toFixed(1);
+    const avgHum = Math.round(average(humidities, previousSensorState.humidity.current || 0));
+    const avgLux = Math.round(average(luxReadings, previousSensorState.light?.current || 320));
+    const nextMotion = Math.random() < MOTION_CHANCE;
+    const motionTriggered = nextMotion && !previousSensorState.motion.current;
+
+    return {
+      temperature: {
+        current: avgTemp,
+        history: appendHistory(previousSensorState.temperature.history, avgTemp),
+      },
+      humidity: {
+        current: avgHum,
+        history: appendHistory(previousSensorState.humidity.history, avgHum),
+      },
+      light: {
+        current: avgLux,
+        history: appendHistory(previousSensorState.light?.history || [], avgLux),
+      },
+      motion: {
+        current: nextMotion,
+        lastEvent: motionTriggered ? new Date().toLocaleTimeString() : previousSensorState.motion.lastEvent,
+        alertCount: previousSensorState.motion.alertCount + (motionTriggered ? 1 : 0),
+      },
+    };
+  }, []);
+
+  const emitTopicMessage = useCallback((topic, payload) => {
+    const exactListeners = listenersRef.current[topic] || [];
+    const wildcardListeners = listenersRef.current[ROOM_TOPIC] || [];
+
+    exactListeners.forEach((callback) => callback(payload));
+    wildcardListeners.forEach((callback) => callback({ topic, payload }));
+  }, []);
+
+  const on = useCallback((topic, callback) => {
+    if (!listenersRef.current[topic]) {
+      listenersRef.current[topic] = new Set();
+    }
+
+    listenersRef.current[topic].add(callback);
+  }, []);
+
+  const off = useCallback((topic, callback) => {
+    const listeners = listenersRef.current[topic];
+    if (!listeners) {
+      return;
+    }
+
+    listeners.delete(callback);
+    if (listeners.size === 0) {
+      delete listenersRef.current[topic];
+    }
+  }, []);
 
   useEffect(() => {
-    // Connect to real MQTT broker
-    const mqttClient = mqtt.connect('wss://4d9428ecfbbe4084896b1c3a240cbe9e.s1.eu.hivemq.cloud:8884/mqtt', {
+    const client = mqtt.connect('wss://4d9428ecfbbe4084896b1c3a240cbe9e.s1.eu.hivemq.cloud:8884/mqtt', {
       username: 'Tuyen',
       password: '123456789tT',
       protocol: 'wss',
       keepalive: 60,
+      reconnectPeriod: 1000,
     });
 
-    mqttClient.on('connect', () => {
+    client.on('connect', () => {
       setIsConnected(true);
       addLog('$SYS/broker', 'HiveMQ Cloud · MQTTS · TLS 1.3 · Port 8883', 'system');
-      mqttClient.subscribe('tuyenhome/env/#', { qos: 1 }, (err) => {
-        if (err) {
-          console.error('MQTT subscribe error:', err);
-        } else {
-          console.log('Subscribed to tuyenhome/env/#');
+      client.subscribe(ROOM_TOPIC, { qos: 1 }, (error) => {
+        if (error) {
+          console.error('MQTT subscribe error:', error);
         }
       });
     });
 
-    mqttClient.on('message', (topic, message) => {
+    client.on('message', (topic, message) => {
+      const payloadText = message.toString();
+      emitTopicMessage(topic, payloadText);
+
       try {
         const roomKey = topic.split('/')[2];
-        const payload = JSON.parse(message.toString());
+        if (!ROOM_KEYS.includes(roomKey)) {
+          return;
+        }
 
-        setAllRoomsData((prevData) => ({
-          ...prevData,
+        const payload = JSON.parse(payloadText);
+        const currentRoom = realtimeRoomsRef.current[roomKey] || ROOM_DEFAULTS[roomKey];
+        const nextRooms = {
+          ...realtimeRoomsRef.current,
           [roomKey]: {
-            temperature: parseFloat(payload.temperature),
-            humidity: parseFloat(payload.humidity)
-          }
-        }));
+            temperature: toNumber(payload.temperature, currentRoom.temperature),
+            humidity: toNumber(payload.humidity, currentRoom.humidity),
+            lux: toNumber(payload.lux ?? payload.light, currentRoom.lux),
+          },
+        };
+
+        roomRealtimeRef.current[roomKey] = Date.now();
+        realtimeRoomsRef.current = nextRooms;
         setLastUpdate(new Date());
-        addLog(topic, JSON.stringify(payload), 'receive');
-      } catch (err) {
-        console.error('MQTT message parse error:', err);
+        addLog(topic, payloadText, 'receive');
+      } catch (error) {
+        console.error('MQTT message parse error:', error);
       }
     });
 
-    mqttClient.on('error', (err) => {
-      console.error('MQTT connection error:', err);
+    client.on('error', (error) => {
+      console.error('MQTT connection error:', error);
     });
 
-    mqttClient.on('close', () => {
+    client.on('close', () => {
+      setIsConnected(false);
+    });
+
+    client.on('offline', () => {
       setIsConnected(false);
     });
 
     return () => {
-      mqttClient.end();
+      client.end();
     };
-  }, []);
+  }, [addLog, emitTopicMessage, updateLegacySensorSnapshot]);
 
-  // Legacy simulation timer (keep for fallback)
   useEffect(() => {
-    // Simulate initial connection delay
-    const connectTimer = setTimeout(() => {
-    }, 1200);
+    const initialRooms = createRoomsSnapshot();
+    simulatedRoomsRef.current = initialRooms;
+    realtimeRoomsRef.current = initialRooms;
+    setAllRoomsData(initialRooms);
+    setSensorData((prev) => updateLegacySensorSnapshot(initialRooms, prev));
 
-    // Periodic data ticks
     timerRef.current = setInterval(() => {
-      const label = timeLabel();
+      const now = Date.now();
+      const previousRooms = simulatedRoomsRef.current;
+      const nextRooms = ROOM_KEYS.reduce((accumulator, roomKey) => {
+        const currentRoom = previousRooms[roomKey] || ROOM_DEFAULTS[roomKey];
+        const lastRealtimeAt = roomRealtimeRef.current[roomKey] || 0;
+        const hasFreshRealtime = now - lastRealtimeAt <= REALTIME_STALE_MS;
+        const targetRoom = hasFreshRealtime
+          ? realtimeRoomsRef.current[roomKey] || ROOM_DEFAULTS[roomKey]
+          : ROOM_DEFAULTS[roomKey];
+        const targetTemperature = toNumber(targetRoom.temperature, ROOM_DEFAULTS[roomKey].temperature);
+        const targetHumidity = toNumber(targetRoom.humidity, ROOM_DEFAULTS[roomKey].humidity);
+        const targetLux = toNumber(targetRoom.lux, ROOM_DEFAULTS[roomKey].lux);
+        const baseTemperature = toNumber(currentRoom.temperature, ROOM_DEFAULTS[roomKey].temperature);
+        const baseHumidity = toNumber(currentRoom.humidity, ROOM_DEFAULTS[roomKey].humidity);
+        const baseLux = toNumber(currentRoom.lux, ROOM_DEFAULTS[roomKey].lux);
 
-      setSensorData(prev => {
-        const newTemp   = +clamp(prev.temperature.current + (Math.random() - 0.48) * 0.7, 18, 40).toFixed(1);
-        const newHum    = Math.round(clamp(prev.humidity.current + (Math.random() - 0.5) * 2.5, 30, 95));
-        const newMotion = Math.random() < MOTION_CHANCE;
-        const motionTriggered = newMotion && !prev.motion.current;
-
-        addLog('home/temperature', `${newTemp} °C`);
-        addLog('home/humidity',    `${newHum} %`);
-        if (motionTriggered) addLog('home/motion', '1 — MOTION DETECTED', 'alert');
-
-        return {
-          temperature: {
-            current: newTemp,
-            history: [...prev.temperature.history.slice(-(HISTORY_POINTS - 1)), { time: label, value: newTemp }],
-          },
-          humidity: {
-            current: newHum,
-            history: [...prev.humidity.history.slice(-(HISTORY_POINTS - 1)), { time: label, value: newHum }],
-          },
-          motion: {
-            current:    newMotion,
-            lastEvent:  motionTriggered ? new Date().toLocaleTimeString() : prev.motion.lastEvent,
-            alertCount: prev.motion.alertCount + (motionTriggered ? 1 : 0),
-          },
+        accumulator[roomKey] = {
+          temperature: stepToward(baseTemperature, targetTemperature, 0.9, 18, 40),
+          humidity: stepHumidity(baseHumidity, targetHumidity),
+          lux: stepLux(baseLux, targetLux),
         };
-      });
+        return accumulator;
+      }, {});
 
+      simulatedRoomsRef.current = nextRooms;
+      setAllRoomsData(nextRooms);
+      setSensorData((prev) => updateLegacySensorSnapshot(nextRooms, prev));
       setLastUpdate(new Date());
     }, UPDATE_INTERVAL);
 
     return () => {
-      clearTimeout(connectTimer);
       clearInterval(timerRef.current);
     };
-  }, [addLog]);
+  }, [updateLegacySensorSnapshot]);
 
-  // ── Device control (publishes MQTT command) ─────────────────
   const toggleDevice = useCallback((device, value, extra = {}) => {
-    setDeviceStates(prev => {
+    setDeviceStates((prev) => {
       if (device === 'light') {
         const brightness = extra.brightness ?? value;
         addLog('home/device/light', brightness > 0 ? `${brightness}%` : 'OFF', 'publish');
         return { ...prev, light: { on: brightness > 0, brightness } };
       }
+
       if (device === 'fan') {
         const speed = extra.speed ?? value;
         addLog('home/device/fan', speed > 0 ? `${speed}%` : 'OFF', 'publish');
         return { ...prev, fan: { on: speed > 0, speed } };
       }
+
       return prev;
     });
   }, [addLog]);
 
-  return { isConnected, sensorData, deviceStates, commandLog, toggleDevice, lastUpdate };
+  const activeEspRooms = ROOM_KEYS.filter((roomKey) => (
+    Date.now() - (roomRealtimeRef.current[roomKey] || 0) <= REALTIME_STALE_MS
+  ));
+
+  const telemetryMeta = {
+    modeLabel: activeEspRooms.length > 0 ? 'Live ESP + Simulated' : 'Simulated Mesh Only',
+    espNodeCount: activeEspRooms.length,
+    simulatedNodeCount: 6,
+    activeEspRooms,
+    totalVisibleNodes: 6,
+  };
+
+  return {
+    isConnected,
+    sensorData,
+    allRoomsData,
+    deviceStates,
+    commandLog,
+    toggleDevice,
+    lastUpdate,
+    on,
+    off,
+    telemetryMeta,
+  };
 }
