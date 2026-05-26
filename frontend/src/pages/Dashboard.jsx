@@ -656,6 +656,7 @@ export default function Dashboard({
   isConnected,
   allRoomsData = {},
   canManageSystem = true,
+  canControlDevices = true,
 }) {
   const { isDark, colors, chartColors } = useTheme();
   const [lockedUsers, setLockedUsers] = useState([]);
@@ -935,6 +936,12 @@ export default function Dashboard({
                     height={60}
                   />
                   
+                  <YAxis 
+                    stroke={colors.textSecondary}
+                    style={{ fontSize: 10 }}
+                    domain={['dataMin - 2', 'dataMax + 2']}
+                  />
+
                   <Tooltip
                     contentStyle={{
                       background: chartColors.tooltipBg,
@@ -1143,17 +1150,17 @@ export default function Dashboard({
         <SectionHeader
           icon={Zap}
           title="Active Devices"
-          subtitle={canManageSystem ? 'Relay-controlled actuators via ESP32' : 'Customer accounts can monitor device status'}
+          subtitle={canControlDevices ? 'Relay-controlled actuators via ESP32' : 'Customer accounts can monitor device status'}
         />
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1fr_1.1fr]">
           <LightControl
             initialBrightness={light.brightness}
-            disabled={!canManageSystem}
+            disabled={!canControlDevices}
             onBrightnessChange={(brightness) => toggleDevice('light', brightness)}
           />
           <FanControl
             initialSpeed={fan.speed}
-            disabled={!canManageSystem}
+            disabled={!canControlDevices}
             onSpeedChange={(speed) => toggleDevice('fan', speed)}
           />
           <CommandLog entries={commandLog} />

@@ -36,13 +36,13 @@ static const uint8_t LDR_PIN = 32;
 static const uint8_t RELAY_LED_PIN = 17;
 
 // MQTT topics
-const char* TOPIC_TEMP = "tuyenhome/sensor/temperature";
-const char* TOPIC_HUMIDITY = "tuyenhome/sensor/humidity";
-const char* TOPIC_MOTION = "tuyenhome/sensor/motion";
-const char* TOPIC_LIGHT_LEVEL = "tuyenhome/sensor/light";
-const char* TOPIC_LIGHT_SET = "tuyenhome/device/light/set";
-const char* TOPIC_LIGHT_STATE = "tuyenhome/device/light/state";
-const char* TOPIC_DEVICE_STATUS = "tuyenhome/device/status";
+const char* TOPIC_TEMP = "home/temperature";
+const char* TOPIC_HUMIDITY = "home/humidity";
+const char* TOPIC_MOTION = "home/motion";
+const char* TOPIC_LIGHT_LEVEL = "home/light";
+const char* TOPIC_DOOR_CONTROL = "home/door/control";
+const char* TOPIC_DOOR_STATE = "home/door/state";
+const char* TOPIC_DEVICE_STATUS = "home/device/status";
 
 // Chu ky gui du lieu
 const unsigned long SENSOR_PUBLISH_INTERVAL_MS = 5000;
@@ -148,8 +148,8 @@ void syncClockForTLS() {
 }
 
 void publishOutputState() {
-  const char* stateText = outputState ? "ON" : "OFF";
-  mqttClient.publish(TOPIC_LIGHT_STATE, stateText, true);
+  const char* stateText = outputState ? "unlocked" : "locked";
+  mqttClient.publish(TOPIC_DOOR_STATE, stateText, true);
   Serial.print("[MQTT] Da cap nhat trang thai output: ");
   Serial.println(stateText);
 }
@@ -217,13 +217,13 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.print(": ");
   Serial.println(message);
 
-  if (strcmp(topic, TOPIC_LIGHT_SET) == 0) {
-    if (strcmp(message, "ON") == 0) {
+  if (strcmp(topic, TOPIC_DOOR_CONTROL) == 0) {
+    if (strcmp(message, "unlock") == 0) {
       applyOutputState(true);
-    } else if (strcmp(message, "OFF") == 0) {
+    } else if (strcmp(message, "lock") == 0) {
       applyOutputState(false);
     } else {
-      Serial.println("[MQTT] Lenh khong hop le. Chi chap nhan ON hoac OFF.");
+      Serial.println("[MQTT] Lenh khong hop le. Chi chap nhan unlock hoac lock.");
     }
   }
 }
@@ -261,9 +261,9 @@ bool reconnectMQTT() {
 
     mqttClient.publish(TOPIC_DEVICE_STATUS, "online", true);
 
-    if (mqttClient.subscribe(TOPIC_LIGHT_SET)) {
+    if (mqttClient.subscribe(TOPIC_DOOR_CONTROL)) {
       Serial.print("[MQTT] Da subscribe topic dieu khien: ");
-      Serial.println(TOPIC_LIGHT_SET);
+      Serial.println(TOPIC_DOOR_CONTROL);
     } else {
       Serial.println("[MQTT] Subscribe topic dieu khien that bai.");
     }

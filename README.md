@@ -46,6 +46,7 @@ Thank you for reviewing and exploring the IoT Smart Home Security platform!
 - React 19 + Vite dashboard with responsive desktop/mobile layout.
 - Login screen with dark/light theme support and session persistence via `localStorage`.
 - Protected app shell with page-level views for Dashboard, Security, Environment, Profile, and Analytics.
+- Global Settings Context and customizable Notification utility for enhanced UX.
 - Live sensor simulation hook for temperature, humidity, and motion data with rolling history windows.
 - Real-time styled MQTT command log UI.
 - Device control widgets for light brightness and fan speed.
@@ -78,13 +79,14 @@ Thank you for reviewing and exploring the IoT Smart Home Security platform!
 - Console monitoring utility in `backend/monitor.py` for system, API, MQTT, and sensor statistics.
 
 ### Security API Track (Node.js / MongoDB)
-- Express 5 API with `helmet`, `cors`, JSON body limits, and centralized error handling.
+- Express 5 API with `helmet`, `cors`, JSON body limits, request sanitization, and centralized error handling.
 - MongoDB connection management through Mongoose.
 - JWT authentication with issuer, audience, and expiry support.
 - Role-based access control for `Guest`, `HomeOwner`, and `SuperAdmin`.
-- Brute-force resistance with failed-login counting and automatic account lock after repeated failures.
+- Brute-force resistance with failed-login counting, automatic account lock, and dynamic IP Banning capabilities.
 - Rate limiting for both general API traffic and authentication routes.
 - Security audit logging via MongoDB `SecurityLog` model.
+- Dynamic backend settings management via MongoDB `Setting` model.
 - SuperAdmin-only locked-user review and account unlock endpoints.
 - Email alert support through Nodemailer for lockouts and unauthorized access attempts.
 - Dockerfile and Docker Compose configuration for the Node API + MongoDB stack.
@@ -99,7 +101,7 @@ Thank you for reviewing and exploring the IoT Smart Home Security platform!
 ### Firmware and Related Clients
 - ESP32 firmware sources for smart-home device control and telemetry publishing.
 - ESP8266 firmware source for alternate device setup.
-- Expo-based mobile client scaffold with dashboard, environment, security, profile, and login screens.
+- Expo-based mobile client with dark/light ThemeContext, dedicated utility services, and screens for dashboard, environment, security, profile, and login.
 - Project scripts for Windows one-click startup and setup verification.
 
 ## Tech Stack
@@ -234,6 +236,7 @@ docker compose up --build
 - Full startup check: `scripts\SETUP_AND_RUN.ps1`
 - One-click Windows launcher: `scripts\RUN_ALL.bat`
 - Backend-only helper: `backend\start_backend.ps1`
+- Mobile app launcher: `start-mobile.bat`
 
 ## Project Structure
 

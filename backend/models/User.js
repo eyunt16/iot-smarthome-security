@@ -36,7 +36,7 @@ const userSchema = new Schema(
     role: {
       type: String,
       required: true,
-      enum: ['SuperAdmin', 'HomeOwner', 'Guest'],
+      enum: ['SuperAdmin', 'HomeOwner', 'Guest', 'admin'],
       default: 'Guest',
       index: true,
     },
@@ -67,6 +67,10 @@ const userSchema = new Schema(
       required: true,
       default: false,
       index: true,
+    },
+    expoPushTokens: {
+      type: [String],
+      default: [],
     },
   },
   {

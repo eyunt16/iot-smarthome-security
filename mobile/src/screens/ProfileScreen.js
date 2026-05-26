@@ -1,16 +1,87 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Platform } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  SafeAreaView,
+  TouchableOpacity,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  Switch,
+  Platform,
+} from 'react-native';
 import * as Device from 'expo-device';
-import { colors } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
+import { api } from '../services/api';
 
-export default function ProfileScreen({ onLogout }) {
+export default function ProfileScreen({ onLogout, user }) {
+  const { isDark, toggleTheme, themeColors } = useTheme();
+
+  // Change Password form states
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changing, setChanging] = useState(false);
+
+  const username = user?.username || 'mytuyen_admin';
+  const roleLabel = user?.role === 'admin' || user?.role === 'SuperAdmin' ? 'Admin' : 'Homeowner';
+  const emailVal = user?.email || `${username}@smarthome.com`;
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      Alert.alert('Validation Error', 'Please fill out all password fields.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Validation Error', 'New passwords do not match.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      Alert.alert('Validation Error', 'Password must be at least 8 characters long.');
+      return;
+    }
+
+    setChanging(true);
+    try {
+      const response = await api.post('/auth/change-password', {
+        currentPassword,
+        newPassword
+      });
+      Alert.alert('Success', response.message || 'Password changed successfully!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      // If POST fallback fails, try PUT
+      try {
+        const response = await api.post('/auth/change-password', {
+          currentPassword,
+          newPassword
+        }, { method: 'PUT' });
+        Alert.alert('Success', response.message || 'Password changed successfully!');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } catch (errInner) {
+        const msg = errInner.response?.data?.message || errInner.message || 'Unable to update password. Verify your current password.';
+        Alert.alert('Error', msg);
+      }
+    } finally {
+      setChanging(false);
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Header with Logout Button */}
-      <View style={styles.topHeader}>
-        <Text style={styles.appTitle}>Profile</Text>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.bg }]}>
+      {/* Header */}
+      <View style={[styles.topHeader, { backgroundColor: themeColors.card, borderBottomColor: themeColors.border }]}>
+        <Text style={[styles.appTitle, { color: themeColors.text }]}>Settings</Text>
         <TouchableOpacity 
-          style={styles.logoutIconBtn}
+          style={[styles.logoutIconBtn, { backgroundColor: themeColors.bg }]}
           onPress={onLogout}
         >
           <Text style={styles.logoutIcon}>📤</Text>
@@ -19,179 +90,159 @@ export default function ProfileScreen({ onLogout }) {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Settings</Text>
-          <Text style={styles.headerSubtitle}>Manage your account</Text>
-        </View>
-
-        {/* User Profile Card */}
-        <View style={styles.profileCard}>
+        {/* User Card */}
+        <View style={[styles.profileCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
+            <View style={[styles.avatar, { backgroundColor: themeColors.bg, borderColor: themeColors.accent }]}>
               <Text style={styles.avatarText}>👤</Text>
             </View>
-            <View style={styles.shieldBadge}>
+            <View style={[styles.shieldBadge, { backgroundColor: themeColors.success, borderColor: themeColors.card }]}>
               <Text style={styles.shieldText}>✓</Text>
             </View>
           </View>
-          <Text style={styles.userName}>My Tuyen</Text>
-          <Text style={styles.userEmail}>mytuyen@home.io</Text>
+          <Text style={[styles.userName, { color: themeColors.text }]}>{username}</Text>
+          <Text style={[styles.userEmail, { color: themeColors.textMuted }]}>{emailVal}</Text>
         </View>
 
-        {/* Role & Access */}
+        {/* Roles Access Grid */}
         <View style={styles.infoRow}>
-          <View style={styles.infoCard}>
-            <View style={styles.infoIconContainer}>
+          <View style={[styles.infoCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <View style={[styles.infoIconContainer, { backgroundColor: themeColors.bg }]}>
               <Text style={styles.infoIcon}>👑</Text>
             </View>
-            <Text style={styles.infoLabel}>Role</Text>
-            <Text style={styles.infoValue}>System Admin</Text>
+            <Text style={[styles.infoLabel, { color: themeColors.textMuted }]}>Role</Text>
+            <Text style={[styles.infoValue, { color: themeColors.text }]}>{roleLabel}</Text>
           </View>
-          <View style={styles.infoCard}>
-            <View style={styles.infoIconContainer}>
+          <View style={[styles.infoCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <View style={[styles.infoIconContainer, { backgroundColor: themeColors.bg }]}>
               <Text style={styles.infoIcon}>🔑</Text>
             </View>
-            <Text style={styles.infoLabel}>Access</Text>
-            <Text style={styles.infoValue}>Full Control</Text>
+            <Text style={[styles.infoLabel, { color: themeColors.textMuted }]}>Access</Text>
+            <Text style={[styles.infoValue, { color: themeColors.text }]}>
+              {user?.role === 'admin' || user?.role === 'SuperAdmin' ? 'Full Control' : 'Home Access'}
+            </Text>
           </View>
         </View>
 
-        {/* Active Sessions */}
+        {/* Dynamic Dark Mode Settings Toggle */}
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Active Sessions</Text>
-            <View style={styles.sessionBadge}>
-              <Text style={styles.sessionBadgeText}>2 Online</Text>
+          <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Appearance & Theme</Text>
+          <View style={[styles.settingCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <View style={styles.settingContent}>
+              <View style={[styles.settingIcon, { backgroundColor: themeColors.bg }]}>
+                <Text style={styles.settingIconText}>🌙</Text>
+              </View>
+              <View style={styles.settingText}>
+                <Text style={[styles.settingName, { color: themeColors.text }]}>Dark Mode</Text>
+                <Text style={[styles.settingDesc, { color: themeColors.textMuted }]}>Adaptive dark latte UI theme</Text>
+              </View>
             </View>
+            <Switch
+              value={isDark}
+              onValueChange={toggleTheme}
+              trackColor={{ false: themeColors.border, true: themeColors.accent }}
+              thumbColor="#FFFFFF"
+            />
           </View>
+        </View>
 
-          <View style={styles.sessionItem}>
-            <View style={styles.deviceIcon}>
-              {/* Tự động đổi icon tùy theo hệ điều hành đang cầm */}
+        {/* Functional Change Password Form */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Change Credentials</Text>
+          <View style={[styles.passwordForm, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <Text style={[styles.formHeader, { color: themeColors.text }]}>Update Password</Text>
+            <Text style={[styles.formSub, { color: themeColors.textMuted }]}>Minimum length is 8 characters</Text>
+
+            <TextInput
+              style={[styles.inputField, { backgroundColor: themeColors.bg, color: themeColors.text, borderColor: themeColors.border }]}
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              placeholder="Current Password"
+              placeholderTextColor={themeColors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <TextInput
+              style={[styles.inputField, { backgroundColor: themeColors.bg, color: themeColors.text, borderColor: themeColors.border }]}
+              value={newPassword}
+              onChangeText={setNewPassword}
+              placeholder="New Password"
+              placeholderTextColor={themeColors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <TextInput
+              style={[styles.inputField, { backgroundColor: themeColors.bg, color: themeColors.text, borderColor: themeColors.border }]}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="Confirm New Password"
+              placeholderTextColor={themeColors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity 
+              style={[styles.submitBtn, { backgroundColor: themeColors.accent }]}
+              onPress={handleChangePassword}
+              disabled={changing}
+            >
+              {changing ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.submitBtnText}>Update Credentials</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Active System Device Info */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Active Sessions</Text>
+          
+          <View style={[styles.sessionItem, { backgroundColor: themeColors.card, borderColor: themeColors.border, marginBottom: 12 }]}>
+            <View style={[styles.deviceIcon, { backgroundColor: themeColors.bg }]}>
               <Text style={styles.deviceIconText}>
                 {Platform.OS === 'ios' ? '🍎' : '🤖'}
               </Text>
             </View>
-            
             <View style={styles.sessionInfo}>
-              {/* Device.modelName sẽ in ra chính xác dòng máy, VD: "iPhone 15 Pro" */}
-              <Text style={styles.sessionDevice}>
-                {Device.modelName || 'Mobile Device'} (Current)
+              <Text style={[styles.sessionDevice, { color: themeColors.text }]}>
+                {Device.modelName || 'Mobile Client Device'}
               </Text>
-              
-              {/* In thêm hệ điều hành ở dưới cho xịn */}
-              <Text style={styles.sessionTime}>
-                {Device.osName} {Device.osVersion} • Active now
+              <Text style={[styles.sessionTime, { color: themeColors.textMuted }]}>
+                {Device.osName} {Device.osVersion} • Connected over LAN
               </Text>
             </View>
-            <View style={styles.onlineDot} />
+            <View style={[styles.onlineDot, { backgroundColor: themeColors.success }]} />
           </View>
 
-          <View style={styles.sessionItem}>
-            <View style={styles.deviceIcon}>
+          <View style={[styles.sessionItem, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <View style={[styles.deviceIcon, { backgroundColor: themeColors.bg }]}>
               <Text style={styles.deviceIconText}>💻</Text>
             </View>
             <View style={styles.sessionInfo}>
-              <Text style={styles.sessionDevice}>MacBook Air - Home Office</Text>
-              <Text style={styles.sessionTime}>Active now</Text>
+              <Text style={[styles.sessionDevice, { color: themeColors.text }]}>
+                Windows PC (Web Client)
+              </Text>
+              <Text style={[styles.sessionTime, { color: themeColors.textMuted }]}>
+                Chrome on Windows 11 • Remote Access
+              </Text>
             </View>
-            <View style={styles.onlineDot} />
+            <View style={[styles.onlineDot, { backgroundColor: themeColors.success }]} />
           </View>
         </View>
 
-        {/* Privacy & Notifications Settings */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Privacy & Notification Settings</Text>
-
-          <View style={styles.settingCard}>
-            <View style={styles.settingContent}>
-              <View style={styles.settingIcon}>
-                <Text style={styles.settingIconText}>🔔</Text>
-              </View>
-              <View style={styles.settingText}>
-                <Text style={styles.settingName}>Push Notifications</Text>
-                <Text style={styles.settingDesc}>Alerts for security events</Text>
-              </View>
-            </View>
-            <View style={styles.toggle}>
-              <View style={styles.toggleOn} />
-            </View>
-          </View>
-
-          <View style={styles.settingCard}>
-            <View style={styles.settingContent}>
-              <View style={styles.settingIcon}>
-                <Text style={styles.settingIconText}>👁️</Text>
-              </View>
-              <View style={styles.settingText}>
-                <Text style={styles.settingName}>Private Mode</Text>
-                <Text style={styles.settingDesc}>Hide stats from guest users</Text>
-              </View>
-            </View>
-            <View style={styles.toggle}>
-              <View style={styles.toggleOff} />
-            </View>
-          </View>
-
-          <View style={styles.settingCard}>
-            <View style={styles.settingContent}>
-              <View style={styles.settingIcon}>
-                <Text style={styles.settingIconText}>📍</Text>
-              </View>
-              <View style={styles.settingText}>
-                <Text style={styles.settingName}>Location Awareness</Text>
-                <Text style={styles.settingDesc}>Auto-lock when leaving home</Text>
-              </View>
-            </View>
-            <View style={styles.toggle}>
-              <View style={styles.toggleOn} />
-            </View>
-          </View>
-        </View>
-
-        {/* System Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>System Information</Text>
-
-          <View style={styles.infoItem}>
-            <View style={styles.infoItemIcon}>
-              <Text style={styles.infoItemIconText}>🏠</Text>
-            </View>
-            <View style={styles.infoItemContent}>
-              <Text style={styles.infoItemLabel}>Project name</Text>
-              <Text style={styles.infoItemValue}>Tuyen_Main_Hub_v2</Text>
-            </View>
-          </View>
-
-          <View style={styles.infoItem}>
-            <View style={styles.infoItemIcon}>
-              <Text style={styles.infoItemIconText}>🎛️</Text>
-            </View>
-            <View style={styles.infoItemContent}>
-              <Text style={styles.infoItemLabel}>Microcontroller</Text>
-              <Text style={styles.infoItemValue}>ESP32-S3 WROOM</Text>
-            </View>
-          </View>
-
-          <View style={styles.infoItem}>
-            <View style={styles.infoItemIcon}>
-              <Text style={styles.infoItemIconText}>⏱️</Text>
-            </View>
-            <View style={styles.infoItemContent}>
-              <Text style={styles.infoItemLabel}>Firmware</Text>
-              <Text style={styles.infoItemValue}>1.4.2 (Latest)</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
+        {/* Sign Out Button */}
+        <TouchableOpacity style={[styles.logoutBtn, { backgroundColor: themeColors.accent }]} onPress={onLogout}>
           <Text style={styles.logoutIcon}>📤</Text>
-          <Text style={styles.logoutText}>Sign Out</Text>
+          <Text style={styles.logoutText}>Sign Out Command Center</Text>
         </TouchableOpacity>
 
-        <Text style={styles.footer}>VERSION 2.0.4 • BUILT WITH CARE</Text>
+        <Text style={[styles.footer, { color: themeColors.textMuted }]}>
+          PLATFORM VERSION 2.0.4 • ESTABLISHED MQTTS 8883
+        </Text>
 
       </ScrollView>
     </SafeAreaView>
@@ -201,198 +252,132 @@ export default function ProfileScreen({ onLogout }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+  },
+  topHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  appTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  logoutIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoutIcon: {
+    fontSize: 20,
   },
   scrollContent: {
     padding: 20,
     paddingTop: 10,
-    paddingBottom: 32,
-  },
-  header: {
-    marginBottom: 24,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
+    paddingBottom: 40,
   },
   profileCard: {
-    backgroundColor: colors.surface,
     borderRadius: 20,
-    padding: 32,
+    padding: 24,
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: colors.border,
   },
   avatarContainer: {
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.background,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: colors.accent,
   },
   avatarText: {
-    fontSize: 40,
+    fontSize: 36,
   },
   shieldBadge: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.success,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: colors.surface,
+    borderWidth: 2,
   },
   shieldText: {
-    fontSize: 16,
+    fontSize: 13,
     color: '#FFFFFF',
     fontWeight: '700',
   },
   userName: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   userEmail: {
-    fontSize: 14,
-    color: colors.textMuted,
+    fontSize: 13,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 24,
-    gap: 12,
+    marginBottom: 20,
+    gap: 10,
   },
   infoCard: {
     flex: 1,
-    backgroundColor: colors.surface,
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
   },
   infoIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: colors.background,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
   },
   infoIcon: {
-    fontSize: 22,
+    fontSize: 18,
   },
   infoLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 4,
   },
   infoValue: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
-    color: colors.text,
   },
   section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '700',
-    color: colors.text,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-  },
-  sessionBadge: {
-    backgroundColor: colors.success,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  sessionBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  sessionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 14,
     marginBottom: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  deviceIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  deviceIconText: {
-    fontSize: 20,
-  },
-  sessionInfo: {
-    flex: 1,
-  },
-  sessionDevice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  sessionTime: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  onlineDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.success,
   },
   settingCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.surface,
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 14,
-    marginBottom: 10,
     borderWidth: 1,
-    borderColor: colors.border,
   },
   settingContent: {
     flexDirection: 'row',
@@ -400,113 +385,116 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingIcon: {
-    width: 40,
-    height: 40,
+    width: 38,
+    height: 38,
     borderRadius: 10,
-    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   settingIconText: {
-    fontSize: 20,
+    fontSize: 18,
   },
   settingText: {
     flex: 1,
   },
   settingName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
   },
   settingDesc: {
-    fontSize: 12,
-    color: colors.textMuted,
+    fontSize: 11,
     marginTop: 2,
   },
-  toggle: {
-    width: 50,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.border,
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  toggleOn: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.success,
-    marginLeft: 'auto',
-  },
-  toggleOff: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.textMuted,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
+  passwordForm: {
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: colors.border,
+    padding: 16,
   },
-  infoItemIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  infoItemIconText: {
-    fontSize: 20,
-  },
-  infoItemContent: {
-    flex: 1,
-  },
-  infoItemLabel: {
-    fontSize: 12,
-    color: colors.textMuted,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  infoItemValue: {
+  formHeader: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    marginBottom: 2,
+  },
+  formSub: {
+    fontSize: 11,
+    marginBottom: 12,
+  },
+  inputField: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  submitBtn: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  submitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  sessionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+  },
+  deviceIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  deviceIconText: {
+    fontSize: 18,
+  },
+  sessionInfo: {
+    flex: 1,
+  },
+  sessionDevice: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  sessionTime: {
+    fontSize: 11,
     marginTop: 2,
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.accent,
-    borderRadius: 18,
-    paddingVertical: 16,
-    marginVertical: 16,
+    borderRadius: 16,
+    paddingVertical: 14,
+    marginVertical: 10,
   },
   logoutIcon: {
-    fontSize: 18,
-    marginRight: 8,
+    fontSize: 16,
+    marginRight: 6,
   },
   logoutText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   footer: {
-    fontSize: 11,
-    color: colors.textMuted,
+    fontSize: 10,
     textAlign: 'center',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginTop: 24,
+    marginTop: 20,
   },
 });

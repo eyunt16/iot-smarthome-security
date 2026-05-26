@@ -1,17 +1,21 @@
 import React from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { colors } from '../theme/colors';
+import { useTheme } from '../theme/ThemeContext';
+import { canManageSystem } from '../utils/roleUtils';
 
-export default function BottomNav({ activeTab, onTabChange }) {
+export default function BottomNav({ activeTab, onTabChange, user }) {
+  const { themeColors } = useTheme();
+  const isAdmin = canManageSystem(user);
+  
   const tabs = [
     { id: 'dashboard', icon: '📊', label: 'Dashboard' },
-    { id: 'security', icon: '🛡️', label: 'Security' },
+    ...(isAdmin ? [{ id: 'security', icon: '🛡️', label: 'Security' }] : []),
     { id: 'environment', icon: '🌱', label: 'Environment' },
     { id: 'profile', icon: '👤', label: 'Profile' },
   ];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.card, borderTopColor: themeColors.border }]}>
       {tabs.map(tab => (
         <TouchableOpacity
           key={tab.id}
@@ -19,7 +23,11 @@ export default function BottomNav({ activeTab, onTabChange }) {
           onPress={() => onTabChange(tab.id)}
         >
           <Text style={styles.tabIcon}>{tab.icon}</Text>
-          <Text style={[styles.tabLabel, activeTab === tab.id && styles.tabLabelActive]}>
+          <Text style={[
+            styles.tabLabel, 
+            { color: activeTab === tab.id ? themeColors.accent : themeColors.textMuted },
+            activeTab === tab.id && styles.tabLabelActive
+          ]}>
             {tab.label}
           </Text>
         </TouchableOpacity>
@@ -35,13 +43,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    backgroundColor: colors.surface,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
     paddingBottom: 8,
     paddingTop: 8,
     elevation: 8,
-    shadowColor: colors.text,
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -61,10 +66,8 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.textMuted,
   },
   tabLabelActive: {
-    color: colors.accent,
     fontWeight: '700',
   },
 });

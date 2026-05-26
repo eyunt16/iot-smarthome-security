@@ -1,7 +1,9 @@
 import React from 'react';
+import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   ShieldCheck,
+  Shield,
   Leaf,
   UserCircle,
   LogOut,
@@ -12,24 +14,57 @@ import {
 import { useTheme } from '../contexts/DarkModeContext';
 import { canManageSystem, getRoleLabel } from '../services/authSession';
 
-const NAV = [
+const NAV_TOP = [
   { id: 'dashboard',   label: 'Dashboard',   icon: LayoutDashboard },
-  { id: 'security',    label: 'Security',    icon: ShieldCheck },
+];
+
+const NAV_BOTTOM = [
   { id: 'environment', label: 'Environment', icon: Leaf },
   { id: 'profile',     label: 'Profile',     icon: UserCircle },
 ];
 
 export default function Sidebar({ activePage, setActivePage, onLogout, currentUser }) {
   const { isDark, colors } = useTheme();
-  const isAdmin = canManageSystem(currentUser);
-  const navItems = isAdmin ? NAV : NAV.filter((item) => item.id !== 'security');
+  // Mình tạm thời không quan tâm nó là Admin hay Homeowner nữa, ép nó lấy tên hiển thị
   const displayName = currentUser?.username || 'Guest User';
-  const roleLabel = isAdmin ? 'System Admin' : getRoleLabel(currentUser);
+  const roleLabel = getRoleLabel(currentUser) || 'Homeowner';
 
-  // Global accent — Forest Green (light) or Muted Gold (dark)
+  // Global accent
   const accent     = isDark ? '#C8AA76' : '#1A4D2E';
   const accentBg   = isDark ? 'rgba(200,170,118,0.15)' : 'rgba(26,77,46,0.1)';
   const inactiveBg = isDark ? 'rgba(90,71,48,0.3)' : 'rgba(26,77,46,0.06)';
+
+  const renderNavItem = ({ id, label, icon: Icon }) => {
+    const active = activePage === id;
+    return (
+      <button
+        key={id}
+        onClick={() => setActivePage(id)}
+        className="group flex w-full items-center gap-3 rounded-[16px] px-4 py-3.5 text-left text-[14px] font-medium transition-all duration-300 hover:scale-[1.02] hover:shadow-md"
+        style={{
+          backgroundColor: active ? accentBg : 'transparent',
+          color: active ? colors.text : colors.textSecondary,
+        }}
+      >
+        <div
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-[12px] transition-all duration-300"
+          style={{
+            backgroundColor: active ? accent : inactiveBg,
+            color: active ? '#FFFFFF' : colors.textSecondary,
+          }}
+        >
+          <Icon size={15} strokeWidth={active ? 2.4 : 2} color={active ? '#FFFFFF' : colors.textSecondary} />
+        </div>
+        <span className="flex-1 font-semibold">{label}</span>
+        {active && (
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: accent }}
+          />
+        )}
+      </button>
+    );
+  };
 
   return (
     <aside
@@ -42,7 +77,6 @@ export default function Sidebar({ activePage, setActivePage, onLogout, currentUs
           : '0 24px 60px rgba(155,124,84,0.12)',
       }}
     >
-      {/* ── Logo ─────────────────────────────────────────── */}
       <div
         className="border-b px-7 pb-6 pt-7 transition-all duration-300"
         style={{ borderColor: colors.border }}
@@ -85,7 +119,6 @@ export default function Sidebar({ activePage, setActivePage, onLogout, currentUs
         </div>
       </div>
 
-      {/* ── Navigation ───────────────────────────────────── */}
       <nav className="flex-1 overflow-y-auto px-4 py-6 scrollbar-hidden">
         <p
           className="mb-3 px-2 text-[9px] font-bold uppercase tracking-[0.3em] transition-colors duration-300"
@@ -94,49 +127,51 @@ export default function Sidebar({ activePage, setActivePage, onLogout, currentUs
           Main Menu
         </p>
         <div className="space-y-1">
-          {navItems.map(({ id, label, icon: Icon }) => {
-            const active = activePage === id;
-            return (
-              <button
-                key={id}
-                onClick={() => setActivePage(id)}
-                className="group flex w-full items-center gap-3 rounded-[16px] px-4 py-3.5 text-left text-[14px] font-medium transition-all duration-300 hover:scale-[1.02] hover:shadow-md"
+          {NAV_TOP.map(renderNavItem)}
+
+          {/* 🔥 CHỐT CỨNG NÚT SECURITY Ở ĐÂY, KHÔNG CHO AI XÓA 🔥 */}
+          {canManageSystem(currentUser) && (
+            <NavLink
+              to="/security"
+              onClick={(e) => {
+                e.preventDefault();
+                setActivePage('security');
+              }}
+              className="group flex w-full items-center gap-3 rounded-[16px] px-4 py-3.5 text-left text-[14px] font-medium transition-all duration-300 hover:scale-[1.02] hover:shadow-md"
+              style={{
+                backgroundColor: activePage === 'security' ? accentBg : 'transparent',
+                color: activePage === 'security' ? colors.text : colors.textSecondary,
+              }}
+            >
+              <div
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-[12px] transition-all duration-300"
                 style={{
-                  backgroundColor: active ? accentBg : 'transparent',
-                  color: active ? colors.text : colors.textSecondary,
+                  backgroundColor: activePage === 'security' ? accent : inactiveBg,
+                  color: activePage === 'security' ? '#FFFFFF' : colors.textSecondary,
                 }}
               >
-                {/* Icon badge */}
-                <div
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-[12px] transition-all duration-300"
-                  style={{
-                    backgroundColor: active ? accent : inactiveBg,
-                    color: active ? '#FFFFFF' : colors.textSecondary,
-                  }}
-                >
-                  <Icon size={15} strokeWidth={active ? 2.4 : 2} color={active ? '#FFFFFF' : colors.textSecondary} />
-                </div>
-                <span className="flex-1 font-semibold">{label}</span>
-                {active && (
-                  <span
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: accent }}
-                  />
-                )}
-              </button>
-            );
-          })}
+                <Shield size={15} strokeWidth={activePage === 'security' ? 2.4 : 2} color={activePage === 'security' ? '#FFFFFF' : colors.textSecondary} />
+              </div>
+              <span className="flex-1 font-semibold">Security</span>
+              {activePage === 'security' && (
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: accent }}
+                />
+              )}
+            </NavLink>
+          )}
+
+          {NAV_BOTTOM.map(renderNavItem)}
         </div>
       </nav>
 
-      {/* ── User + Logout ─────────────────────────────────── */}
       <div
         className="border-t px-4 py-5 transition-all duration-300"
         style={{ borderColor: colors.border }}
       >
         <div
-          className="mb-2.5 flex items-center gap-3 rounded-[18px] p-3 transition-all duration-300"
-          style={{ backgroundColor: isDark ? 'rgba(90,71,48,0.35)' : '#fbf4ea' }}
+          className="mb-3 flex w-full items-center gap-3 rounded-[18px] p-2 transition-all duration-300"
         >
           <div
             className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-white shadow-md transition-all duration-300"
@@ -146,7 +181,7 @@ export default function Sidebar({ activePage, setActivePage, onLogout, currentUs
                 : 'linear-gradient(135deg, #2D6A42, #1A4D2E)',
             }}
           >
-            <Sparkles size={15} />
+            <UserCircle size={20} />
           </div>
           <div className="min-w-0">
             <p

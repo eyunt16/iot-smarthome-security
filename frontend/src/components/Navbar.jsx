@@ -1,11 +1,17 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, LineChart, LogOut, ShieldCheck } from 'lucide-react';
+// Đã import thêm icon Shield (cho Security) và User (cho Profile)
+import { Home, LineChart, LogOut, ShieldCheck, Shield, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function Navbar() {
+  // Lấy role từ localStorage, chuyển hết thành chữ thường để chống lỗi viết hoa viết thường (Admin vs admin)
+  const currentRole = (localStorage.getItem('role') || '').toLowerCase();
+  const isAdmin = currentRole === 'admin' || currentRole === 'superadmin';
+
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('role'); // Xóa luôn role cho sạch sẽ bộ nhớ
     window.location.href = '/login';
   };
 
@@ -30,11 +36,30 @@ export default function Navbar() {
         >
           <Home size={18} /> <span className="hidden md:inline">Dashboard</span>
         </NavLink>
+        
         <NavLink 
           to="/analytics" 
           className={({isActive}) => `flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 ${isActive ? 'bg-primary-500/10 text-primary-500 font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
         >
           <LineChart size={18} /> <span className="hidden md:inline">Analytics</span>
+        </NavLink>
+
+        {/* 🔥 TÍNH NĂNG PHÂN QUYỀN: Chỉ hiển thị nút này nếu tài khoản là Admin 🔥 */}
+        {isAdmin && (
+          <NavLink 
+            to="/security" 
+            className={({isActive}) => `flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 ${isActive ? 'bg-red-500/10 text-red-500 font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+          >
+            <Shield size={18} /> <span className="hidden md:inline">Security</span>
+          </NavLink>
+        )}
+
+        {/* Nút Profile dành cho tất cả mọi người (kể cả admin hay customer) */}
+        <NavLink 
+          to="/profile" 
+          className={({isActive}) => `flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 ${isActive ? 'bg-primary-500/10 text-primary-500 font-medium' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+        >
+          <User size={18} /> <span className="hidden md:inline">Profile</span>
         </NavLink>
         
         <div className="h-6 w-[1px] bg-gray-200 dark:bg-slate-700 mx-2"></div>

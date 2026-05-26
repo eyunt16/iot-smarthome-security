@@ -467,7 +467,10 @@ export default function LoginScreen({ onLoginSuccess }) {
       });
 
       if (response?.token || response?.status === 'success') {
-        onLoginSuccess(response.token || 'api-auth-token');
+        onLoginSuccess(
+          response.token || 'api-auth-token',
+          response.user || { username: signinUsername, role: 'customer' }
+        );
       } else {
         setSigninError(response?.message || INVALID_CREDENTIALS_MESSAGE);
       }

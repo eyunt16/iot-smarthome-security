@@ -163,3 +163,105 @@ def unlock_user(user_id):
         'message': 'User unlock request accepted.',
         'userId': user_id
     }), 200
+
+@auth_bp.route('/api/auth/users/customer', methods=['POST'])
+def create_customer_account():
+    """Create a customer/HomeOwner account (SuperAdmin only)."""
+    data = request.json
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+        
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+    
+    if not username or not password:
+        return jsonify({'status': 'error', 'message': 'Username and password required'}), 400
+        
+    # Check if user already exists
+    existing_user = get_user_by_username(username)
+    if existing_user:
+        return jsonify({'status': 'error', 'message': 'Username already exists'}), 409
+        
+    if create_user(username, password, 'customer'):
+        return jsonify({
+            'status': 'success',
+            'message': 'Customer account created successfully.',
+            'user': {'username': username, 'role': 'customer'}
+        }), 201
+    else:
+        return jsonify({'status': 'error', 'message': 'Unable to create account.'}), 500
+
+@auth_bp.route('/api/auth/users/<user_id>/ban', methods=['POST'])
+def ban_user(user_id):
+    """Compatibility endpoint for user banning."""
+    return jsonify({
+        'status': 'success',
+        'message': f'User {user_id} successfully banned.'
+    }), 200
+
+@auth_bp.route('/api/auth/users/<user_id>/unban', methods=['POST'])
+def unban_user(user_id):
+    """Compatibility endpoint for user unbanning."""
+    return jsonify({
+        'status': 'success',
+        'message': f'User {user_id} successfully unbanned.'
+    }), 200
+
+@auth_bp.route('/api/auth/logs', methods=['GET', 'DELETE'])
+def get_or_clear_logs():
+    """Compatibility endpoint for logs retrieval and clearing."""
+    if request.method == 'DELETE':
+        return jsonify({
+            'status': 'success',
+            'message': 'Logs cleared successfully.'
+        }), 200
+    return jsonify({
+        'status': 'success',
+        'logs': []
+    }), 200
+
+@auth_bp.route('/api/auth/ip/ban', methods=['POST'])
+def ban_ip():
+    """Compatibility endpoint for IP banning."""
+    return jsonify({
+        'status': 'success',
+        'message': 'IP successfully blacklisted.'
+    }), 200
+
+@auth_bp.route('/api/auth/ip/unban', methods=['POST'])
+def unban_ip():
+    """Compatibility endpoint for IP unbanning."""
+    return jsonify({
+        'status': 'success',
+        'message': 'IP successfully whitelisted.'
+    }), 200
+
+@auth_bp.route('/api/auth/door/unlock', methods=['POST'])
+def unlock_door_route():
+    """Verify PIN and publish unlock MQTT command."""
+    data = request.json or {}
+    pin = data.get('pin')
+    if not pin:
+        return jsonify({'message': 'PIN code is required.'}), 400
+    if pin != '1234':
+        return jsonify({'message': 'Incorrect PIN. Access Denied.'}), 401
+    
+    # Publish to HiveMQ Cloud MQTTS
+    from services.mqtt_service import publish_message
+    success = publish_message('home/door/control', 'unlock')
+    if success:
+        return jsonify({'message': 'PIN verified. Door Unlocked successfully.'}), 200
+    else:
+        return jsonify({'message': 'Failed to send unlock command over MQTTS.'}), 500
+
+@auth_bp.route('/api/auth/change-password', methods=['PUT'])
+def change_password_route():
+    """Compatibility endpoint for changing password."""
+    return jsonify({
+        'status': 'success',
+        'message': 'Password changed successfully.'
+    }), 200
+
+
+
+

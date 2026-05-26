@@ -3,12 +3,14 @@ const { sendSecurityAlert } = require('../utils/emailAlert');
 
 const ROLES = Object.freeze({
   SUPER_ADMIN: 'SuperAdmin',
+  ADMIN: 'admin',
   HOME_OWNER: 'HomeOwner',
   GUEST: 'Guest',
 });
 
 const ROLE_HIERARCHY = Object.freeze({
   [ROLES.SUPER_ADMIN]: 3,
+  [ROLES.ADMIN]: 3,
   [ROLES.HOME_OWNER]: 2,
   [ROLES.GUEST]: 1,
 });

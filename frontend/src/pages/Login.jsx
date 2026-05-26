@@ -249,6 +249,10 @@ export default function Login({ onLoginSuccess }) {
           token: response.token,
           user: response.user || { username: username.trim() },
         });
+        // 🔥 ALSO save role directly to localStorage for backward compatibility
+        if (response.user?.role) {
+          localStorage.setItem('role', response.user.role);
+        }
         onLoginSuccess?.(response.user);
         navigate('/', { replace: true });
         return;

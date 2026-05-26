@@ -14,7 +14,7 @@ export function ThemeProvider({ children }) {
     const html = document.documentElement;
     if (isDark) {
       html.classList.add('dark');
-      document.body.style.background = 'linear-gradient(180deg, #3A312B 0%, #332A24 100%)';
+      document.body.style.background = 'linear-gradient(180deg, #888686 0%, #605a55 100%)';
       document.body.style.color = '#E8E0D5';
     } else {
       html.classList.remove('dark');
@@ -36,7 +36,7 @@ export function ThemeProvider({ children }) {
       accentLight:   '#2D6A42',       // Lighter forest green
       accentBg:      '#E8F2EC',       // Green-tinted bg for active items
       border:        '#E8DECE',       // Warm cream border
-      gold:          '#A68A64',       // Bronze/warm gold (support color)
+      gold:          '#bda481',       // Bronze/warm gold (support color)
       sliderYellow:  '#FFD700',
       sliderBlue:    '#5B8BD5',
       sliderPurple:  '#A86FD5',
@@ -79,7 +79,7 @@ export function ThemeProvider({ children }) {
     // Grid lines: near invisible in dark
     gridStroke:  isDark ? 'rgba(92,77,66,0.45)' : 'rgba(144,116,74,0.12)',
     // Tooltip bg
-    tooltipBg:   isDark ? '#4E4238' : '#FFFAF4',
+    tooltipBg:   isDark ? '#917f70' : '#FFFAF4',
   };
 
   return (

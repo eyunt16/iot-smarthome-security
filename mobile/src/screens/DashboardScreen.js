@@ -1,62 +1,160 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Alert } from 'react-native';
-import { colors } from '../theme/colors';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  SafeAreaView,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
+import { useTheme } from '../theme/ThemeContext';
 import { api } from '../services/api';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
+import { canControlDevices } from '../utils/roleUtils';
 
-export default function DashboardScreen({ onLogout }) {
-  const [temp, setTemp] = useState(24.5);
-  const [humidity, setHumidity] = useState(48);
-  const [lightOn, setLightOn] = useState(true);
-  const [fanMode, setFanMode] = useState('Auto');
+export default function DashboardScreen({ onLogout, user }) {
+  const { isDark, themeColors } = useTheme();
+  const isAuthorizedToControl = canControlDevices(user);
+  
+  // Real sensor states
+  const [temp, setTemp] = useState(27.4);
+  const [humidity, setHumidity] = useState(58);
+  const [lightLevel, setLightLevel] = useState(320);
+  const [motion, setMotion] = useState(false);
+  const [lastMotionTime, setLastMotionTime] = useState('No event');
+
+  // Control states
+  const [lightOn, setLightOn] = useState(false);
+  const [lightBrightness, setLightBrightness] = useState(0);
+  const [fanSpeed, setFanSpeed] = useState(0); // 0 (Off), 35 (Eco), 70 (Mid), 100 (Max)
+  const [commandLogs, setCommandLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchSensorData();
-    const interval = setInterval(fetchSensorData, 10000);
+    fetchCommandLogs();
+    const interval = setInterval(() => {
+      fetchSensorData();
+      fetchCommandLogs();
+    }, 6000);
     return () => clearInterval(interval);
   }, []);
 
   const fetchSensorData = async () => {
     try {
-      const response = await api.get('/sensors');
-      if (response && response.sensors) {
-        setTemp(response.sensors.temperature || 24.5);
-        setHumidity(response.sensors.humidity || 48);
+      const response = await api.get('/data');
+      if (response) {
+        if (response.temperature !== undefined) setTemp(Number(response.temperature));
+        if (response.humidity !== undefined) setHumidity(Number(response.humidity));
+        if (response.light !== undefined) setLightLevel(Number(response.light));
+        
+        const isMotionActive = response.motion === '1' || response.motion === 1 || response.motion === true;
+        setMotion(isMotionActive);
+        if (isMotionActive) {
+          setLastMotionTime(new Date().toLocaleTimeString());
+        }
       }
     } catch (err) {
       console.log('Error fetching sensor data:', err);
     }
   };
 
-  const toggleLight = async () => {
+  const fetchCommandLogs = async () => {
     try {
-      await api.post('/devices/light', { state: !lightOn });
-      setLightOn(!lightOn);
+      const response = await api.get('/history');
+      if (Array.isArray(response)) {
+        // Map history to simple formatted logs
+        const formatted = response.map((item, idx) => {
+          let payloadStr = 'N/A';
+          if (item.data) {
+            payloadStr = typeof item.data === 'object' ? JSON.stringify(item.data) : String(item.data);
+          } else if (item.payload) {
+            payloadStr = String(item.payload);
+          }
+          
+          return {
+            id: idx + '-' + (item.timestamp || Date.now()),
+            time: item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
+            topic: item.topic || 'home/telemetry',
+            payload: payloadStr
+          };
+        }).slice(0, 5); // Take latest 5 logs
+        setCommandLogs(formatted);
+      }
     } catch (err) {
-      Alert.alert('Error', 'Failed to toggle light');
+      console.log('Error fetching command logs:', err);
     }
   };
 
-  const cycleFanMode = async () => {
-    const modes = ['Off', 'Eco', 'Auto'];
-    const currentIndex = modes.indexOf(fanMode);
-    const nextMode = modes[(currentIndex + 1) % modes.length];
-    try {
-      await api.post('/devices/fan', { mode: nextMode });
-      setFanMode(nextMode);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to change fan mode');
+  const handleLightToggle = async (turnOn) => {
+    if (!isAuthorizedToControl) {
+      Alert.alert('Access Denied', 'View only for customer accounts.');
+      return;
     }
+    try {
+      const nextBrightness = turnOn ? 100 : 0;
+      await api.post('/device/light/1', { brightness: nextBrightness });
+      setLightOn(turnOn);
+      setLightBrightness(nextBrightness);
+      fetchCommandLogs();
+    } catch (err) {
+      Alert.alert('Control Error', 'Failed to update light state.');
+    }
+  };
+
+  const handleBrightnessChange = async (value) => {
+    if (!isAuthorizedToControl) {
+      Alert.alert('Access Denied', 'View only for customer accounts.');
+      return;
+    }
+    try {
+      await api.post('/device/light/1', { brightness: value });
+      setLightBrightness(value);
+      setLightOn(value > 0);
+      fetchCommandLogs();
+    } catch (err) {
+      console.log('Error changing light brightness:', err);
+    }
+  };
+
+  const handleFanSpeedChange = async (speed) => {
+    if (!isAuthorizedToControl) {
+      Alert.alert('Access Denied', 'View only for customer accounts.');
+      return;
+    }
+    try {
+      await api.post('/device/fan', { speed });
+      setFanSpeed(speed);
+      fetchCommandLogs();
+    } catch (err) {
+      Alert.alert('Control Error', 'Failed to update fan speed.');
+    }
+  };
+
+  const getFanModeText = () => {
+    if (fanSpeed === 0) return 'Off';
+    if (fanSpeed <= 35) return 'Eco';
+    if (fanSpeed <= 70) return 'Medium';
+    return 'Max Speed';
+  };
+
+  const getGreeting = () => {
+    const hours = new Date().getHours();
+    if (hours < 12) return 'Good Morning';
+    if (hours < 18) return 'Good Afternoon';
+    return 'Good Evening';
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Header with Logout Button */}
-      <View style={styles.topHeader}>
-        <Text style={styles.appTitle}>Tuyen Home</Text>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.bg }]}>
+      {/* Header */}
+      <View style={[styles.topHeader, { backgroundColor: themeColors.card, borderBottomColor: themeColors.border }]}>
+        <Text style={[styles.appTitle, { color: themeColors.text }]}>Tuyen Home</Text>
         <TouchableOpacity 
-          style={styles.logoutIconBtn}
+          style={[styles.logoutIconBtn, { backgroundColor: themeColors.bg }]}
           onPress={onLogout}
         >
           <Text style={styles.logoutIcon}>📤</Text>
@@ -65,156 +163,230 @@ export default function DashboardScreen({ onLogout }) {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {/* Greeting Header */}
-        <Text style={styles.greeting}>Good Afternoon</Text>
-        <Text style={styles.dateTime}>Thursday, October 24, 2024 • 2:45 PM</Text>
+        {/* Motion Danger Warning Banner */}
+        {motion && (
+          <View style={[styles.motionBanner, { backgroundColor: themeColors.danger }]}>
+            <Text style={styles.motionBannerText}>⚠️ INTRUSION ALERT: Motion detected in Living Room!</Text>
+            <Text style={styles.motionBannerSub}>Timestamp: {lastMotionTime}</Text>
+          </View>
+        )}
 
-        {/* System Status Card */}
-        <View style={styles.statusCard}>
+        {/* Greeting */}
+        <Text style={[styles.greeting, { color: themeColors.text }]}>{getGreeting()}</Text>
+        <Text style={[styles.dateTime, { color: themeColors.textMuted }]}>
+          {new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} • {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>
+
+        {/* Dynamic Status Card */}
+        <View style={[styles.statusCard, { backgroundColor: isDark ? 'rgba(16,185,129,0.15)' : '#E8F5E9' }]}>
           <View style={styles.statusHeader}>
             <View>
-              <Text style={styles.statusBadge}>🛡️ System Secured</Text>
-              <Text style={styles.statusDetail}>Privacy Shield Active</Text>
+              <Text style={[styles.statusBadge, { color: themeColors.success }]}>🛡️ Secure Protection Active</Text>
+              <Text style={[styles.statusDetail, { color: themeColors.success }]}>SSL Strict Port Protocol 8883</Text>
             </View>
-            <View style={styles.statusBadgeActive}>
-              <Text style={styles.statusBadgeActiveText}>ACTIVE</Text>
+            <View style={[styles.statusBadgeActive, { backgroundColor: themeColors.success }]}>
+              <Text style={styles.statusBadgeActiveText}>SECURED</Text>
             </View>
           </View>
           <View style={styles.statusRow}>
-            <View style={styles.statusItem}>
+            <View style={[styles.statusItem, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(16,185,129,0.08)' }]}>
               <Text style={styles.statusItemIcon}>🔐</Text>
-              <Text style={styles.statusItemText}>Doors Locked</Text>
+              <Text style={[styles.statusItemText, { color: themeColors.text }]}>Smart Lock On</Text>
             </View>
-            <View style={styles.statusItem}>
-              <Text style={styles.statusItemIcon}>📹</Text>
-              <Text style={styles.statusItemText}>Cams Encrypted</Text>
+            <View style={[styles.statusItem, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(16,185,129,0.08)' }]}>
+              <Text style={styles.statusItemIcon}>👁️</Text>
+              <Text style={[styles.statusItemText, { color: themeColors.text }]}>Anti-Inject On</Text>
             </View>
           </View>
         </View>
 
-        {/* Temperature & Humidity */}
-        <View style={styles.metricsRow}>
-          <View style={[styles.metricCard, styles.metricTemp]}>
-            <View style={styles.metricHeader}>
-              <Text style={styles.metricLabel}>TEMPERATURE</Text>
-              <View style={styles.metricDot} />
+        {/* Distinct Compact Stat Pills / Cards for Rooms */}
+        <Text style={[styles.controlsTitle, { color: themeColors.text }]}>Multi-Room Telemetry</Text>
+        
+        <View style={styles.roomsGridContainer}>
+          {/* Living Room Card (ESP8266/ESP32 Real Live) */}
+          <View style={[styles.roomCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <View style={styles.roomHeader}>
+              <Text style={[styles.roomTitle, { color: themeColors.text }]}>Living Room ESP</Text>
+              <View style={[styles.liveIndicator, { backgroundColor: themeColors.success }]} />
             </View>
-            <Text style={styles.metricValue}>{temp.toFixed(1)}°C</Text>
-            <View style={styles.miniChart} />
+            <View style={styles.pillRow}>
+              <View style={[styles.statPill, { backgroundColor: themeColors.bg }]}>
+                <Text style={styles.pillIcon}>🌡️</Text>
+                <Text style={[styles.pillValue, { color: themeColors.text }]}>{temp.toFixed(1)}°C</Text>
+              </View>
+              <View style={[styles.statPill, { backgroundColor: themeColors.bg }]}>
+                <Text style={styles.pillIcon}>💧</Text>
+                <Text style={[styles.pillValue, { color: themeColors.text }]}>{humidity.toFixed(0)}%</Text>
+              </View>
+            </View>
           </View>
 
-          <View style={[styles.metricCard, styles.metricHum]}>
-            <View style={styles.metricHeader}>
-              <Text style={styles.metricLabel}>HUMIDITY</Text>
-              <View style={styles.metricDot} />
+          {/* Bedroom Card (Simulated Node) */}
+          <View style={[styles.roomCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <View style={styles.roomHeader}>
+              <Text style={[styles.roomTitle, { color: themeColors.text }]}>Bedroom Sim</Text>
+              <View style={[styles.liveIndicator, { backgroundColor: themeColors.accent }]} />
             </View>
-            <Text style={styles.metricValue}>{humidity}%</Text>
-            <View style={styles.miniChart} />
+            <View style={styles.pillRow}>
+              <View style={[styles.statPill, { backgroundColor: themeColors.bg }]}>
+                <Text style={styles.pillIcon}>🌡️</Text>
+                <Text style={[styles.pillValue, { color: themeColors.text }]}>{(temp - 2.5).toFixed(1)}°C</Text>
+              </View>
+              <View style={[styles.statPill, { backgroundColor: themeColors.bg }]}>
+                <Text style={styles.pillIcon}>💧</Text>
+                <Text style={[styles.pillValue, { color: themeColors.text }]}>{(humidity + 7).toFixed(0)}%</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Kitchen Card (Simulated Node) */}
+          <View style={[styles.roomCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+            <View style={styles.roomHeader}>
+              <Text style={[styles.roomTitle, { color: themeColors.text }]}>Kitchen Sim</Text>
+              <View style={[styles.liveIndicator, { backgroundColor: themeColors.accent }]} />
+            </View>
+            <View style={styles.pillRow}>
+              <View style={[styles.statPill, { backgroundColor: themeColors.bg }]}>
+                <Text style={styles.pillIcon}>🌡️</Text>
+                <Text style={[styles.pillValue, { color: themeColors.text }]}>{(temp + 1.6).toFixed(1)}°C</Text>
+              </View>
+              <View style={[styles.statPill, { backgroundColor: themeColors.bg }]}>
+                <Text style={styles.pillIcon}>💧</Text>
+                <Text style={[styles.pillValue, { color: themeColors.text }]}>{(humidity - 3).toFixed(0)}%</Text>
+              </View>
+            </View>
           </View>
         </View>
 
-        {/* Motion Detection */}
-        <View style={styles.motionCard}>
-          <View style={styles.motionIcon}>
-            <Text style={styles.motionIconText}>📡</Text>
-          </View>
-          <View style={styles.motionInfo}>
-            <Text style={styles.motionLabel}>LIVING ROOM MOTION</Text>
-            <Text style={styles.motionValue}>No movement detected</Text>
-            <Text style={styles.motionTime}>LAST 2M AGO</Text>
-          </View>
-        </View>
+        {/* Real Device Controls */}
+        <Text style={[styles.controlsTitle, { color: themeColors.text }]}>Controls</Text>
 
-        {/* Controls Section */}
-        <Text style={styles.controlsTitle}>Controls</Text>
-
-        {/* Light Control */}
-        <View style={styles.controlCard}>
+        {/* Light switch and Brightness Segment Toggles */}
+        <View style={[styles.controlCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style={styles.controlHeader}>
-            <View style={styles.controlIcon}>
+            <View style={[styles.controlIcon, { backgroundColor: themeColors.bg }]}>
               <Text style={styles.controlIconText}>💡</Text>
             </View>
-            <View>
-              <Text style={styles.controlName}>Security Light</Text>
-              <Text style={styles.controlStatus}>BRIGHTNESS</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.controlName, { color: themeColors.text }]}>Security Light</Text>
+              <Text style={[styles.controlStatus, { color: themeColors.textMuted }]}>
+                {lightOn ? `ON • ${lightBrightness}% Brightness` : 'OFF'}
+              </Text>
             </View>
+            <TouchableOpacity 
+              style={[
+                styles.lightToggle, 
+                { backgroundColor: lightOn ? themeColors.success : themeColors.border },
+                !isAuthorizedToControl && { opacity: 0.5 }
+              ]}
+              onPress={() => handleLightToggle(!lightOn)}
+              activeOpacity={isAuthorizedToControl ? 0.2 : 1}
+            >
+              <View style={[styles.toggleSwitch, lightOn && styles.toggleOn]} />
+            </TouchableOpacity>
           </View>
-          <View style={styles.lightnessSlider}>
-            <View style={styles.sliderTrack}>
-              <View style={[styles.sliderFill, { width: '80%' }]} />
-            </View>
-            <Text style={styles.sliderLabel}>80%</Text>
+
+          {/* Segmented Brightness Slider Buttons */}
+          <Text style={[styles.sliderHeader, { color: themeColors.textMuted }]}>Adjust Brightness</Text>
+          <View style={styles.brightnessSegments}>
+            {[10, 30, 60, 100].map((level) => (
+              <TouchableOpacity
+                key={level}
+                style={[
+                  styles.segmentButton, 
+                  { 
+                    backgroundColor: lightBrightness === level && lightOn ? themeColors.accent : themeColors.bg,
+                    borderColor: themeColors.border 
+                  },
+                  !isAuthorizedToControl && { opacity: 0.5 }
+                ]}
+                onPress={() => handleBrightnessChange(level)}
+                activeOpacity={isAuthorizedToControl ? 0.2 : 1}
+              >
+                <Text style={[
+                  styles.segmentText, 
+                  { color: lightBrightness === level && lightOn ? '#FFFFFF' : themeColors.text }
+                ]}>
+                  {level}%
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          <TouchableOpacity 
-            style={styles.lightToggle}
-            onPress={toggleLight}
-          >
-            <View style={[styles.toggleSwitch, lightOn && styles.toggleOn]} />
-          </TouchableOpacity>
         </View>
 
-        {/* Fan Control */}
-        <View style={styles.controlCard}>
+        {/* Fan speed control pills */}
+        <View style={[styles.controlCard, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
           <View style={styles.controlHeader}>
-            <View style={styles.controlIcon}>
+            <View style={[styles.controlIcon, { backgroundColor: themeColors.bg }]}>
               <Text style={styles.controlIconText}>🌀</Text>
             </View>
-            <View>
-              <Text style={styles.controlName}>Ceiling Fan</Text>
-              <Text style={styles.controlStatus}>Mode: {fanMode} • Eco</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.controlName, { color: themeColors.text }]}>Ceiling Fan</Text>
+              <Text style={[styles.controlStatus, { color: themeColors.textMuted }]}>
+                Speed: {getFanModeText()}
+              </Text>
             </View>
           </View>
-          <TouchableOpacity 
-            style={styles.fanControl}
-            onPress={cycleFanMode}
-          >
-            <Text style={styles.fanValue}>3</Text>
-            <TouchableOpacity style={styles.fanButton}>
-              <Text style={styles.fanButtonText}>+</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
+
+          {/* Speed settings pills */}
+          <Text style={[styles.sliderHeader, { color: themeColors.textMuted }]}>Adjust Fan Speed</Text>
+          <View style={styles.brightnessSegments}>
+            {[
+              { label: 'Off', val: 0 },
+              { label: 'Eco', val: 35 },
+              { label: 'Mid', val: 70 },
+              { label: 'Max', val: 100 }
+            ].map((speedItem) => (
+              <TouchableOpacity
+                key={speedItem.val}
+                style={[
+                  styles.segmentButton, 
+                  { 
+                    backgroundColor: fanSpeed === speedItem.val ? themeColors.accent : themeColors.bg,
+                    borderColor: themeColors.border 
+                  },
+                  !isAuthorizedToControl && { opacity: 0.5 }
+                ]}
+                onPress={() => handleFanSpeedChange(speedItem.val)}
+                activeOpacity={isAuthorizedToControl ? 0.2 : 1}
+              >
+                <Text style={[
+                  styles.segmentText, 
+                  { color: fanSpeed === speedItem.val ? '#FFFFFF' : themeColors.text }
+                ]}>
+                  {speedItem.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
-        {/* Command Log */}
+        {/* Real Command Log */}
         <View style={styles.logSection}>
           <View style={styles.logHeader}>
-            <Text style={styles.logTitle}>Command Log</Text>
-            <TouchableOpacity>
-              <Text style={styles.viewAllLink}>VIEW ALL</Text>
+            <Text style={[styles.logTitle, { color: themeColors.text }]}>Live System Command Log</Text>
+            <TouchableOpacity onPress={fetchCommandLogs}>
+              <Text style={[styles.viewAllLink, { color: themeColors.accent }]}>REFRESH</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.logCard}>
-            <Text style={styles.logTime}>[14:44:12]</Text>
-            <View style={styles.logContent}>
-              <Text style={styles.logTopic}>TOPIC:</Text>
-              <Text style={styles.logValue}>/home/security/light</Text>
+          {commandLogs.length === 0 ? (
+            <View style={[styles.emptyLogs, { backgroundColor: themeColors.card, borderColor: themeColors.border }]}>
+              <Text style={[styles.emptyText, { color: themeColors.textMuted }]}>No commands issued yet.</Text>
             </View>
-            <Text style={styles.logPayload}>PAYLOAD: ON;</Text>
-          </View>
-
-          <View style={styles.logCard}>
-            <Text style={styles.logTime}>[14:42:05]</Text>
-            <View style={styles.logContent}>
-              <Text style={styles.logTopic}>TOPIC:</Text>
-              <Text style={styles.logValue}>/home/climate/temp</Text>
-            </View>
-            <Text style={styles.logPayload}>PAYLOAD: 24.5C</Text>
-          </View>
-
-          <View style={styles.logCard}>
-            <Text style={styles.logTime}>[14:38:59]</Text>
-            <View style={styles.logContent}>
-              <Text style={styles.logTopic}>TOPIC:</Text>
-              <Text style={styles.logValue}>/home/auth/node_3</Text>
-            </View>
-            <Text style={styles.logPayload}>PAYLOAD: ACK_HANDSHAKE</Text>
-          </View>
-        </View>
-
-        {/* Floating Action Button Placeholder */}
-        <View style={styles.fab}>
-          <Text style={styles.fabText}>+</Text>
+          ) : (
+            commandLogs.map((log) => (
+              <View key={log.id} style={[styles.logCard, { backgroundColor: isDark ? '#3E3128' : '#2A2620' }]}>
+                <Text style={styles.logTime}>[{log.time}]</Text>
+                <View style={styles.logContent}>
+                  <Text style={styles.logTopic}>TOPIC:</Text>
+                  <Text style={styles.logValue}>{log.topic}</Text>
+                </View>
+                <Text style={styles.logPayload}>PAYLOAD: {log.payload}</Text>
+              </View>
+            ))
+          )}
         </View>
 
       </ScrollView>
@@ -225,7 +397,6 @@ export default function DashboardScreen({ onLogout }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
   },
   topHeader: {
     flexDirection: 'row',
@@ -233,20 +404,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   appTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
   },
   logoutIconBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -258,19 +425,33 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 60,
   },
+  motionBanner: {
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+  },
+  motionBannerText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  motionBannerSub: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 11,
+    marginTop: 2,
+  },
   greeting: {
     fontSize: 32,
     fontWeight: '700',
-    color: colors.text,
     marginBottom: 4,
   },
   dateTime: {
     fontSize: 13,
-    color: colors.textMuted,
     marginBottom: 20,
   },
   statusCard: {
-    backgroundColor: '#E8F5E9',
     borderRadius: 18,
     padding: 16,
     marginBottom: 24,
@@ -284,16 +465,13 @@ const styles = StyleSheet.create({
   statusBadge: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.success,
     marginBottom: 4,
   },
   statusDetail: {
     fontSize: 12,
-    color: colors.success,
     fontWeight: '600',
   },
   statusBadgeActive: {
-    backgroundColor: colors.success,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
@@ -311,7 +489,6 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16,185,129,0.1)',
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 12,
@@ -323,299 +500,185 @@ const styles = StyleSheet.create({
   statusItemText: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.text,
   },
-  metricsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 16,
+  controlsTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 12,
   },
-  metricCard: {
-    flex: 1,
+  roomsGridContainer: {
+    gap: 10,
+    marginBottom: 24,
+  },
+  roomCard: {
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
-    borderColor: colors.border,
   },
-  metricTemp: {
-    backgroundColor: colors.surface,
-  },
-  metricHum: {
-    backgroundColor: colors.surface,
-  },
-  metricHeader: {
+  roomHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  metricLabel: {
-    fontSize: 11,
+  roomTitle: {
+    fontSize: 13,
     fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
-  metricDot: {
+  liveIndicator: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.success,
   },
-  metricValue: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 10,
+  pillRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
-  miniChart: {
-    height: 40,
-    backgroundColor: colors.background,
-    borderRadius: 6,
-  },
-  motionCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 16,
+  statPill: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    gap: 6,
   },
-  motionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
+  pillIcon: {
+    fontSize: 14,
   },
-  motionIconText: {
-    fontSize: 24,
-  },
-  motionInfo: {
-    flex: 1,
-  },
-  motionLabel: {
-    fontSize: 11,
+  pillValue: {
+    fontSize: 13,
     fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  motionValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  motionTime: {
-    fontSize: 11,
-    color: colors.textMuted,
-    fontWeight: '600',
-  },
-  controlsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 12,
   },
   controlCard: {
-    backgroundColor: colors.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.border,
   },
   controlHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
   },
   controlIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: colors.background,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   controlIconText: {
-    fontSize: 24,
+    fontSize: 22,
   },
   controlName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
   },
   controlStatus: {
-    fontSize: 12,
-    color: colors.textMuted,
+    fontSize: 11,
     marginTop: 2,
   },
-  lightnessSlider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  sliderTrack: {
-    flex: 1,
-    height: 6,
-    backgroundColor: colors.border,
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginRight: 12,
-  },
-  sliderFill: {
-    height: '100%',
-    backgroundColor: colors.accent,
-  },
-  sliderLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.accent,
-    width: 35,
-    textAlign: 'right',
-  },
   lightToggle: {
-    width: 50,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.success,
+    width: 48,
+    height: 26,
+    borderRadius: 13,
     padding: 2,
     justifyContent: 'center',
   },
   toggleSwitch: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: '#FFFFFF',
   },
   toggleOn: {
     marginLeft: 'auto',
   },
-  fanControl: {
+  sliderHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 14,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  brightnessSegments: {
     flexDirection: 'row',
+    gap: 8,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  fanValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  fanButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: colors.accent,
     justifyContent: 'center',
-    alignItems: 'center',
+    borderWidth: 1,
   },
-  fanButtonText: {
-    fontSize: 20,
+  segmentText: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#FFFFFF',
   },
   logSection: {
-    marginTop: 24,
+    marginTop: 20,
   },
   logHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   logTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   viewAllLink: {
     fontSize: 12,
-    color: colors.accent,
     fontWeight: '700',
   },
+  emptyLogs: {
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  emptyText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   logCard: {
-    backgroundColor: '#2A2620',
     borderRadius: 12,
     padding: 12,
-    marginBottom: 10,
+    marginBottom: 8,
     paddingVertical: 10,
   },
   logTime: {
     fontSize: 11,
-    color: colors.success,
-    fontFamily: 'monospace',
+    color: '#10B981',
+    fontFamily: Platform.select({ ios: 'Courier', default: 'monospace' }),
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   logContent: {
     flexDirection: 'row',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   logTopic: {
     fontSize: 11,
-    color: colors.success,
+    color: '#10B981',
     fontWeight: '700',
     marginRight: 6,
   },
   logValue: {
     fontSize: 11,
-    color: colors.success,
+    color: '#10B981',
   },
   logPayload: {
     fontSize: 11,
-    color: colors.success,
+    color: '#10B981',
   },
-  fab: {
-    position: 'absolute',
-    bottom: 30,
-    right: 20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 5,
-    shadowColor: colors.text,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  fabText: {
-    fontSize: 32,
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  headerContainer: {
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  controlsGrid: {
-    marginTop: 8,
-  },
-}); 
+});

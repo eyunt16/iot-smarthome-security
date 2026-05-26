@@ -4,58 +4,55 @@ const bcrypt = require('bcryptjs');
 const { connectDB, disconnectDB } = require('../config/db');
 const User = require('../models/User');
 
-async function seedSuperAdmin() {
-  const username = (process.env.SEED_SUPERADMIN_USERNAME || 'admin').trim().toLowerCase();
-  const email = (process.env.SEED_SUPERADMIN_EMAIL || 'admin@example.com').trim().toLowerCase();
-  const password = process.env.SEED_SUPERADMIN_PASSWORD || 'Admin@123456';
-
-  if (!password || password.length < 8) {
-    throw new Error('SEED_SUPERADMIN_PASSWORD must be at least 8 characters long.');
-  }
-
+async function seedUsers() {
   await connectDB();
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  // 1. Seed Admin
+  const adminUsername = 'admin';
+  const adminEmail = 'admin@example.com';
+  const adminPassword = process.env.SEED_SUPERADMIN_PASSWORD || 'admin@123456';
+  const adminHash = await bcrypt.hash(adminPassword, 12);
 
-  const user = await User.findOneAndUpdate(
+  await User.findOneAndUpdate(
+    { $or: [{ username: adminUsername }, { email: adminEmail }] },
     {
-      $or: [{ username }, { email }],
-    },
-    {
-      username,
-      email,
-      passwordHash,
-      role: 'SuperAdmin',
+      username: adminUsername,
+      email: adminEmail,
+      passwordHash: adminHash,
+      role: 'admin',
       failedLoginAttempts: 0,
       isLocked: false,
       lastLoginIP: null,
     },
-    {
-      upsert: true,
-      new: true,
-      setDefaultsOnInsert: true,
-    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+  console.info('[SEED] Admin user seeded (username: admin)');
 
-  console.info('[SEED] SuperAdmin is ready');
-  console.info(`[SEED] username: ${user.username}`);
-  console.info(`[SEED] email: ${user.email}`);
-  console.info(`[SEED] password: ${password}`);
+  // 2. Seed Homeowner
+  const homeOwnerUsername = 'homeowner';
+  const homeOwnerEmail = 'homeowner@example.com';
+  const homeOwnerPassword = 'homeowner@123';
+  const homeOwnerHash = await bcrypt.hash(homeOwnerPassword, 12);
+
+  await User.findOneAndUpdate(
+    { $or: [{ username: homeOwnerUsername }, { email: homeOwnerEmail }] },
+    {
+      username: homeOwnerUsername,
+      email: homeOwnerEmail,
+      passwordHash: homeOwnerHash,
+      role: 'HomeOwner',
+      failedLoginAttempts: 0,
+      isLocked: false,
+      lastLoginIP: null,
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  console.info('[SEED] Homeowner user seeded (username: homeowner)');
 }
 
-seedSuperAdmin()
+seedUsers()
   .catch((error) => {
-    console.error('[SEED] Failed to seed SuperAdmin:', error);
-
-    const isLocalMongoRefused =
-      error?.name === 'MongooseServerSelectionError'
-      && String(process.env.MONGODB_URI || '').includes('127.0.0.1:27017');
-
-    if (isLocalMongoRefused) {
-      console.error('[SEED] No MongoDB server is reachable at 127.0.0.1:27017.');
-      console.error('[SEED] Best fix: either start MongoDB locally, start Docker Desktop and run `docker compose up -d mongo`, or change MONGODB_URI in backend/.env to your MongoDB Atlas connection string.');
-    }
-
+    console.error('[SEED] Failed to seed users:', error);
     process.exitCode = 1;
   })
   .finally(async () => {

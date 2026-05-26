@@ -9,9 +9,11 @@ import EnvironmentView from './pages/EnvironmentView';
 import SecurityView from './pages/SecurityView';
 import ProfileView from './pages/ProfileView';
 import Analytics from './pages/Analytics';
+import { useSettings } from './contexts/SettingsContext';
 import {
   AUTH_STATE_CHANGE_EVENT,
   canManageSystem,
+  canControlDevices,
   clearAuthSession,
   getStoredToken,
   getStoredUser,
@@ -20,12 +22,9 @@ import {
 function AppShell({ currentUser, onLogout }) {
   const [activePage, setActivePage] = useState('dashboard');
   const isAdmin = canManageSystem(currentUser);
+  const isAuthorizedToControl = canControlDevices(currentUser);
 
-  useEffect(() => {
-    if (!isAdmin && activePage === 'security') {
-      setActivePage('dashboard');
-    }
-  }, [activePage, isAdmin]);
+
 
   let mqtt;
   try {
@@ -87,7 +86,23 @@ function AppShell({ currentUser, onLogout }) {
     deviceStates,
     commandLog,
     toggleDevice,
+    publish,
   } = mqtt;
+
+  const { settings, showToast } = useSettings();
+
+  useEffect(() => {
+    if (!mqtt) return;
+    const handleMotionMessage = (payload) => {
+      if (payload === '1' && settings.notif) {
+        showToast('⚠️ Security Intrusion', 'Motion detected in the main area!', 'warning');
+      }
+    };
+    mqtt.on('home/motion', handleMotionMessage);
+    return () => {
+      mqtt.off('home/motion', handleMotionMessage);
+    };
+  }, [mqtt, settings.notif, showToast]);
 
   const renderPage = () => {
     switch (activePage) {
@@ -101,26 +116,15 @@ function AppShell({ currentUser, onLogout }) {
             isConnected={isConnected}
             allRoomsData={allRoomsData}
             canManageSystem={isAdmin}
+            canControlDevices={isAuthorizedToControl}
           />
         );
       case 'security':
-        if (!isAdmin) {
-          return (
-            <Dashboard
-              sensorData={hookSensorData}
-              deviceStates={deviceStates}
-              commandLog={commandLog}
-              toggleDevice={toggleDevice}
-              isConnected={isConnected}
-              allRoomsData={allRoomsData}
-              canManageSystem={isAdmin}
-            />
-          );
-        }
         return (
           <SecurityView
             sensorData={hookSensorData}
             commandLog={commandLog}
+            publish={publish}
           />
         );
       case 'environment':

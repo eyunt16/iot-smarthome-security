@@ -28,7 +28,9 @@ import {
 import { SectionHeader }  from '../components/ui/SectionHeader';
 import { ToggleSwitch }   from '../components/ui/ToggleSwitch';
 import { useTheme }       from '../contexts/DarkModeContext';
+import { useSettings }    from '../contexts/SettingsContext';
 import { canManageSystem, getRoleLabel } from '../services/authSession';
+import { changePassword } from '../services/api';
 
 // ── Encryption Hero Banner ────────────────────────────────────
 // Light mode: deep forest green (premium secure feel).
@@ -96,17 +98,13 @@ function EncryptionBanner({ isConnected }) {
 // ── Privacy Settings ──────────────────────────────────────────
 const INITIAL_SETTINGS = [
   { id: 'notif',      icon: Bell,        title: 'Motion Notifications', desc: 'Receive alerts when the PIR sensor detects movement.',                    default: true  },
-  { id: 'datalog',    icon: Database,    title: 'Sensor Data Logging',  desc: 'Store historical readings to the local SQLite database.',                 default: true  },
-  { id: 'remote',     icon: Globe,       title: 'Remote Access',        desc: 'Allow control from outside the local network via MQTTS.',                 default: false },
-  { id: 'biometric',  icon: Fingerprint, title: 'Biometric Auth',       desc: 'Require fingerprint verification for Security toggle changes.',           default: false },
+  { id: 'datalog',    icon: Database,    title: 'Sensor Data Logging',  desc: 'Store historical readings to the local MongoDB database.',                 default: true  },
   { id: 'emailalert', icon: Mail,        title: 'Email Alerts',         desc: 'Send email on security alerts (requires SMTP config).',                   default: false },
 ];
 
 function PrivacySettings() {
   const { isDark, colors } = useTheme();
-  const [settings, setSettings] = useState(() =>
-    Object.fromEntries(INITIAL_SETTINGS.map(s => [s.id, s.default]))
-  );
+  const { settings, updateSetting } = useSettings();
 
   return (
     <div
@@ -136,7 +134,7 @@ function PrivacySettings() {
             Privacy &amp; Notification Settings
           </p>
           <p className="text-[10px] transition-colors duration-300" style={{ color: colors.textSecondary }}>
-            All settings are stored locally
+            All settings are stored in the database
           </p>
         </div>
       </div>
@@ -181,8 +179,8 @@ function PrivacySettings() {
             </div>
             <ToggleSwitch
               id={`setting-${id}`}
-              checked={settings[id]}
-              onChange={(v) => setSettings(p => ({ ...p, [id]: v }))}
+              checked={settings[id] || false}
+              onChange={(v) => updateSetting(id, v)}
             />
           </div>
         ))}
@@ -259,13 +257,84 @@ function SystemInfo() {
   );
 }
 
+// ── Change Password Section ─────────────────────────────────────
+function ChangePasswordSection() {
+  const { isDark, colors } = useTheme();
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (form.newPassword !== form.confirmPassword) {
+      setError('New passwords do not match.');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    setSuccess('');
+    try {
+      await changePassword({ currentPassword: form.currentPassword, newPassword: form.newPassword });
+      setSuccess('Password changed successfully.');
+      setForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to change password.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-3xl border p-6 transition-all duration-300 mt-6"
+      style={{
+        backgroundColor: isDark ? colors.card : '#FFFFFF',
+        borderColor: colors.border,
+        boxShadow: isDark ? '0 4px 12px rgba(0,0,0,0.15)' : '0 4px 20px rgba(155,124,84,0.07)',
+      }}
+    >
+      <div className="flex items-center gap-3 mb-5">
+        <div className="grid h-8 w-8 place-items-center rounded-[12px]" style={{ background: isDark ? 'linear-gradient(135deg, rgba(197,168,128,0.25), rgba(197,168,128,0.10))' : 'linear-gradient(135deg, #f2e4cc, #e8d4b0)' }}>
+          <Lock size={15} style={{ color: isDark ? colors.accent : '#8b7355' }} />
+        </div>
+        <p className="text-[13px] font-bold" style={{ color: colors.text }}>Change Password</p>
+      </div>
+
+      {error && <div className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium" style={{ borderColor: '#D98B8B', backgroundColor: 'rgba(220,100,100,0.10)', color: '#B55B5B' }}>{error}</div>}
+      {success && <div className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium" style={{ borderColor: '#88C9A0', backgroundColor: 'rgba(100,200,140,0.10)', color: '#2F7A52' }}>{success}</div>}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>Current Password</label>
+          <input type="password" required value={form.currentPassword} onChange={e => setForm({...form, currentPassword: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>New Password</label>
+          <input type="password" required minLength={8} value={form.newPassword} onChange={e => setForm({...form, newPassword: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>Confirm New Password</label>
+          <input type="password" required minLength={8} value={form.confirmPassword} onChange={e => setForm({...form, confirmPassword: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+        </div>
+        <div className="flex justify-end pt-2">
+          <button type="submit" disabled={submitting} className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50" style={{ backgroundColor: isDark ? colors.accent : '#8b7355' }}>
+            {submitting ? 'Updating...' : 'Update Password'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ── MAIN ──────────────────────────────────────────────────────
 export default function ProfileView({ isConnected, currentUser }) {
   const { isDark, colors } = useTheme();
-  const isAdmin = canManageSystem(currentUser);
+  const localRole = (localStorage.getItem('role') || '').toLowerCase();
+  const isAdminLocal = localRole === 'admin' || localRole === 'superadmin';
   const displayName = currentUser?.username || 'User';
-  const roleLabel = getRoleLabel(currentUser);
-  const accessLabel = isAdmin ? 'Full Control' : 'Monitoring Only';
+  const roleLabel = isAdminLocal ? 'Admin' : 'Homeowner';
+  const accessLabel = isAdminLocal ? 'Full Control' : 'Monitoring Only';
 
   return (
     <motion.div
@@ -339,6 +408,8 @@ export default function ProfileView({ isConnected, currentUser }) {
                 <span className="text-[10px] font-bold text-green-500">Authenticated</span>
               </div>
             </div>
+
+            <ChangePasswordSection />
           </div>
 
           <PrivacySettings />

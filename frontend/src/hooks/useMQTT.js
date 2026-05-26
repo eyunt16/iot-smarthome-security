@@ -94,6 +94,7 @@ export function useMQTT() {
   });
   const [commandLog, setCommandLog] = useState([]);
 
+  const clientRef = useRef(null);
   const timerRef = useRef(null);
   const simulatedRoomsRef = useRef(createRoomsSnapshot());
   const realtimeRoomsRef = useRef(createRoomsSnapshot());
@@ -176,6 +177,21 @@ export function useMQTT() {
     }
   }, []);
 
+  const publish = useCallback((topic, payload, options = {}) => {
+    if (clientRef.current && clientRef.current.connected) {
+      clientRef.current.publish(topic, payload, options, (err) => {
+        if (err) {
+          console.error('MQTT publish error:', err);
+        } else {
+          addLog(topic, payload, 'publish');
+        }
+      });
+    } else {
+      console.warn('MQTT client not connected. Simulating publish to:', topic);
+      addLog(topic, payload, 'publish');
+    }
+  }, [addLog]);
+
   useEffect(() => {
     const client = mqtt.connect('wss://4d9428ecfbbe4084896b1c3a240cbe9e.s1.eu.hivemq.cloud:8884/mqtt', {
       username: 'Tuyen',
@@ -185,10 +201,12 @@ export function useMQTT() {
       reconnectPeriod: 1000,
     });
 
+    clientRef.current = client;
+
     client.on('connect', () => {
       setIsConnected(true);
       addLog('$SYS/broker', 'HiveMQ Cloud · MQTTS · TLS 1.3 · Port 8883', 'system');
-      client.subscribe(ROOM_TOPIC, { qos: 1 }, (error) => {
+      client.subscribe([ROOM_TOPIC, 'home/motion'], { qos: 1 }, (error) => {
         if (error) {
           console.error('MQTT subscribe error:', error);
         }
@@ -198,6 +216,20 @@ export function useMQTT() {
     client.on('message', (topic, message) => {
       const payloadText = message.toString();
       emitTopicMessage(topic, payloadText);
+
+      if (topic === 'home/motion') {
+        const isMotion = payloadText === '1';
+        setSensorData((prev) => ({
+          ...prev,
+          motion: {
+            current: isMotion,
+            lastEvent: isMotion ? new Date().toLocaleTimeString() : prev.motion.lastEvent,
+            alertCount: prev.motion.alertCount + (isMotion ? 1 : 0),
+          },
+        }));
+        addLog(topic, payloadText, 'receive');
+        return;
+      }
 
       try {
         const roomKey = topic.split('/')[2];
@@ -239,6 +271,7 @@ export function useMQTT() {
 
     return () => {
       client.end();
+      clientRef.current = null;
     };
   }, [addLog, emitTopicMessage, updateLegacySensorSnapshot]);
 
@@ -322,6 +355,7 @@ export function useMQTT() {
     deviceStates,
     commandLog,
     toggleDevice,
+    publish,
     lastUpdate,
     on,
     off,

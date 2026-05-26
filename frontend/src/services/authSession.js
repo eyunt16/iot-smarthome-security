@@ -15,6 +15,11 @@ export function canManageSystem(user) {
   return role === 'superadmin' || role === 'admin';
 }
 
+export function canControlDevices(user) {
+  const role = getUserRole(user);
+  return role === 'superadmin' || role === 'admin' || role === 'homeowner';
+}
+
 export function getRoleLabel(user) {
   const role = getUserRole(user);
 

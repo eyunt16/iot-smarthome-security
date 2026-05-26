@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 
 // Expo Go on a physical device cannot reach localhost on your computer.
 // Use your active Wi-Fi/LAN IPv4 address here and update it if your network changes.
-const LAN_HOST_IP = '192.168.1.191';
+const LAN_HOST_IP = '192.168.1.94';
 const EMULATOR_HOST_IP = Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
 const USE_EMULATOR_HOST = false;
 

@@ -29,7 +29,8 @@ import {
 import { SectionHeader }  from '../components/ui/SectionHeader';
 import { ToggleSwitch }   from '../components/ui/ToggleSwitch';
 import { useTheme }       from '../contexts/DarkModeContext';
-import { getLockedUsers, unlockUser } from '../services/api';
+import { getAllUsers, unlockUser, createCustomerAccount, banUser, unbanUser, getSecurityLogs, clearSecurityLogs, unlockDoor } from '../services/api';
+import { triggerDesktopNotification } from '../utils/notification';
 
 // ── Static seed log entries ───────────────────────────────────
 const SEED_ALERTS = [
@@ -207,149 +208,289 @@ function AlertLog({ liveEntries }) {
   );
 }
 
-// ── Biometric Lock Card ───────────────────────────────────────
-function BiometricLockCard() {
+// ── Smart Door Lock Card ───────────────────────────────────────
+function SmartDoorLockCard({ publish }) {
   const { isDark, colors } = useTheme();
-  const [locked,    setLocked]    = useState(true);
-  const [unlocking, setUnlocking] = useState(false);
+  const [locked, setLocked] = useState(true);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState(false);
 
-  const handleToggle = (v) => {
-    if (v === false) {
-      setUnlocking(true);
-      setTimeout(() => { setLocked(false); setUnlocking(false); }, 1800);
+  const handleToggle = (toUnlocked) => {
+    if (toUnlocked) {
+      // Intercept unlock attempt, pop up PIN modal
+      setShowPinModal(true);
+      setPinInput('');
+      setPinError(false);
     } else {
+      // Lock immediately
       setLocked(true);
+      if (publish) {
+        publish('home/door/control', 'lock');
+      }
     }
+  };
+
+  const handleKeyPress = async (num) => {
+    setPinError(false);
+    if (pinInput.length < 4) {
+      const nextPin = pinInput + num;
+      setPinInput(nextPin);
+      
+      // Auto-submit if 4 digits are completed
+      if (nextPin.length === 4) {
+        try {
+          await unlockDoor(nextPin);
+          setLocked(false);
+          setShowPinModal(false);
+          setPinInput('');
+        } catch (err) {
+          // Wrong PIN or rate limited
+          setPinError(true);
+          setPinInput('');
+        }
+      }
+    }
+  };
+
+  const handleClear = () => {
+    setPinInput(prev => prev.slice(0, -1));
+    setPinError(false);
   };
 
   const accent = isDark ? colors.accent : '#A67B5B';
 
   return (
-    <div
-      className="rounded-3xl border p-6 transition-all duration-500"
-      style={{
-        backgroundColor: !locked
-          ? (isDark ? 'rgba(197,168,128,0.12)' : '#fff8f0')
-          : (isDark ? colors.card : '#FFFFFF'),
-        borderColor: !locked
-          ? (isDark ? `${colors.accent}50` : '#e8c87a99')
-          : colors.border,
-        boxShadow: !locked
-          ? `0 8px 32px ${accent}30`
-          : (isDark ? '0 4px 12px rgba(0,0,0,0.15)' : '0 4px 20px rgba(155,124,84,0.07)'),
-      }}
-    >
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div
-              className="grid h-8 w-8 place-items-center rounded-[12px] transition-all duration-300"
-              style={{
-                backgroundColor: unlocking
-                  ? 'rgba(251,191,36,0.15)'
-                  : !locked
-                    ? (isDark ? 'rgba(251,191,36,0.12)' : '#fef3c7')
-                    : (isDark ? colors.accentBg : '#f0e8d5'),
-              }}
-            >
-              {unlocking
-                ? <Fingerprint size={16} style={{ color: '#FBBF24' }} className="animate-pulse" />
-                : <Lock size={15} style={{ color: !locked ? '#F59E0B' : (isDark ? colors.accent : '#9b886f') }} />
-              }
-            </div>
-            <span
-              className="text-[10px] font-bold uppercase tracking-wider transition-colors duration-300"
-              style={{ color: colors.textSecondary }}
-            >
-              Biometric Lock
-            </span>
-          </div>
-
-          <h3
-            className="font-display text-xl font-bold transition-colors duration-300"
-            style={{ color: colors.text }}
-          >
-            {unlocking ? 'Scanning…' : locked ? 'Room Locked' : 'Room Unlocked'}
-          </h3>
-          <p
-            className="mt-1 text-[11px] max-w-[200px] leading-relaxed transition-colors duration-300"
-            style={{ color: colors.textSecondary }}
-          >
-            {locked
-              ? 'Fingerprint or PIN required for entry. All unauthorised access is logged.'
-              : 'Biometric verified. Access granted. Auto-locks in 30 s.'
-            }
-          </p>
-        </div>
-
-        <ToggleSwitch
-          id="biometric-lock-toggle"
-          checked={!locked}
-          onChange={(v) => handleToggle(v)}
-          variant="warm"
-          disabled={unlocking}
-        />
-      </div>
-
-      {/* Status badge */}
+    <>
       <div
-        className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all duration-300"
+        className="rounded-3xl border p-6 transition-all duration-500"
         style={{
-          backgroundColor: unlocking
-            ? 'rgba(251,191,36,0.15)'
-            : !locked
-              ? (isDark ? 'rgba(251,191,36,0.12)' : 'rgba(251,191,36,0.10)')
-              : (isDark ? colors.accentBg : '#f0e8d5'),
-          color: unlocking || !locked
-            ? '#F59E0B'
-            : (isDark ? colors.textSecondary : '#8e7d68'),
+          backgroundColor: !locked
+            ? (isDark ? 'rgba(197,168,128,0.12)' : '#fff8f0')
+            : (isDark ? colors.card : '#FFFFFF'),
+          borderColor: !locked
+            ? (isDark ? `${colors.accent}50` : '#e8c87a99')
+            : colors.border,
+          boxShadow: !locked
+            ? `0 8px 32px ${accent}30`
+            : (isDark ? '0 4px 12px rgba(0,0,0,0.15)' : '0 4px 20px rgba(155,124,84,0.07)'),
         }}
       >
-        {unlocking
-          ? <><Fingerprint size={11} className="animate-pulse" /> Verifying biometric…</>
-          : !locked
-            ? <><ShieldOff size={11} /> ACCESS GRANTED</>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <div
+                className="grid h-8 w-8 place-items-center rounded-[12px] transition-all duration-300"
+                style={{
+                  backgroundColor: !locked
+                    ? (isDark ? 'rgba(251,191,36,0.12)' : '#fef3c7')
+                    : (isDark ? colors.accentBg : '#f0e8d5'),
+                }}
+              >
+                <Lock size={15} style={{ color: !locked ? '#F59E0B' : (isDark ? colors.accent : '#9b886f') }} />
+              </div>
+              <span
+                className="text-[10px] font-bold uppercase tracking-wider transition-colors duration-300"
+                style={{ color: colors.textSecondary }}
+              >
+                Smart Door Lock
+              </span>
+            </div>
+
+            <h3
+              className="font-display text-xl font-bold transition-colors duration-300"
+              style={{ color: colors.text }}
+            >
+              {locked ? 'Door Locked' : 'Door Unlocked'}
+            </h3>
+            <p
+              className="mt-1 text-[11px] max-w-[200px] leading-relaxed transition-colors duration-300"
+              style={{ color: colors.textSecondary }}
+            >
+              {locked
+                ? 'PIN code verification required to unlock. Access logging active.'
+                : 'PIN verified. Lock unlocked. Secure connection established.'
+              }
+            </p>
+          </div>
+
+          <ToggleSwitch
+            id="smart-door-lock-toggle"
+            checked={!locked}
+            onChange={(v) => handleToggle(v)}
+            variant="warm"
+          />
+        </div>
+
+        {/* Status badge */}
+        <div
+          className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all duration-300"
+          style={{
+            backgroundColor: !locked
+              ? (isDark ? 'rgba(251,191,36,0.12)' : 'rgba(251,191,36,0.10)')
+              : (isDark ? colors.accentBg : '#f0e8d5'),
+            color: !locked
+              ? '#F59E0B'
+              : (isDark ? colors.textSecondary : '#8e7d68'),
+          }}
+        >
+          {!locked
+            ? <><ShieldOff size={11} /> UNLOCKED</>
             : <><ShieldCheck size={11} /> LOCKED — Secure</>
-        }
+          }
+        </div>
       </div>
-    </div>
+
+      {/* GORGEOUS PIN ENTRY MODAL */}
+      {showPinModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-fade-in">
+          {/* Backdrop */}
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            onClick={() => setShowPinModal(false)}
+          />
+
+          {/* Modal Container */}
+          <div 
+            className="relative w-full max-w-sm rounded-[32px] border p-7 shadow-2xl transition-all duration-300 scale-in"
+            style={{
+              borderColor: colors.border,
+              backgroundColor: isDark ? '#4E4238' : '#FFFFFF',
+              color: colors.text,
+            }}
+          >
+            <div className="text-center mb-6">
+              <div 
+                className="mx-auto grid h-12 w-12 place-items-center rounded-2xl mb-3"
+                style={{
+                  backgroundColor: pinError ? 'rgba(220,60,50,0.15)' : 'rgba(197,168,128,0.15)',
+                  color: pinError ? '#EF4444' : (isDark ? colors.accent : '#8b7355'),
+                }}
+              >
+                <Lock size={20} />
+              </div>
+              <h3 className="font-display text-lg font-bold">Secure Access</h3>
+              <p className="text-[11px] mt-1" style={{ color: colors.textSecondary }}>
+                Enter Smart Door Lock PIN to unlock
+              </p>
+            </div>
+
+            {/* PIN Indicator Dots */}
+            <div className="flex justify-center gap-4 mb-7">
+              {[0, 1, 2, 3].map((idx) => {
+                const filled = pinInput.length > idx;
+                return (
+                  <div
+                    key={idx}
+                    className={`h-3.5 w-3.5 rounded-full border transition-all duration-200 ${
+                      filled 
+                        ? 'scale-110 shadow-lg' 
+                        : ''
+                    }`}
+                    style={{
+                      borderColor: pinError ? '#EF4444' : colors.border,
+                      backgroundColor: filled
+                        ? (pinError ? '#EF4444' : (isDark ? colors.accent : '#8b7355'))
+                        : 'transparent'
+                    }}
+                  />
+                );
+              })}
+            </div>
+
+            {pinError && (
+              <p className="text-center text-[11px] text-red-500 font-bold mb-4">
+                Incorrect PIN. Please try again.
+              </p>
+            )}
+
+            {/* Keypad Grid */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => handleKeyPress(String(num))}
+                  className="h-14 rounded-2xl border text-lg font-bold transition-all duration-150 active:scale-95 cursor-pointer"
+                  style={{
+                    borderColor: colors.border,
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1',
+                    color: colors.text,
+                  }}
+                >
+                  {num}
+                </button>
+              ))}
+              
+              <button
+                type="button"
+                onClick={handleClear}
+                className="h-14 rounded-2xl border text-[11px] font-bold uppercase transition-all duration-150 active:scale-95 cursor-pointer"
+                style={{
+                  borderColor: colors.border,
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1',
+                  color: colors.textSecondary,
+                }}
+              >
+                Clear
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleKeyPress('0')}
+                className="h-14 rounded-2xl border text-lg font-bold transition-all duration-150 active:scale-95 cursor-pointer"
+                style={{
+                  borderColor: colors.border,
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1',
+                  color: colors.text,
+                }}
+              >
+                0
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowPinModal(false)}
+                className="h-14 rounded-2xl border text-[11px] font-bold uppercase transition-all duration-150 active:scale-95 cursor-pointer"
+                style={{
+                  borderColor: colors.border,
+                  backgroundColor: isDark ? 'rgba(220,60,50,0.1)' : 'rgba(220,60,50,0.08)',
+                  color: '#EF4444',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            
+            <p className="text-center text-[9px]" style={{ color: colors.textSecondary }}>
+              Default PIN: 1234
+            </p>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
-function LockedAccountsPanel() {
+function ThreatManagementPanel() {
   const { isDark, colors } = useTheme();
-  const [lockedUsers, setLockedUsers] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [unlockingUserId, setUnlockingUserId] = useState('');
   const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [success, setSuccess] = useState('');
+  const [banningIp, setBanningIp] = useState(false);
+  const [ipForm, setIpForm] = useState({ ipAddress: '', reason: '' });
 
-  const fetchLockedUsers = async ({ silent = false } = {}) => {
-    const token = localStorage.getItem('token');
-
-    if (!token) {
-      setError('SuperAdmin session not found. Please sign in again.');
-      setLockedUsers([]);
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-
-    if (silent) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-
+  const fetchLogs = async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
     setError('');
-
     try {
-      const data = await getLockedUsers();
-      setLockedUsers(Array.isArray(data?.users) ? data.users : []);
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || requestError.message || 'Unable to load locked accounts.');
-      setLockedUsers([]);
+      const data = await getSecurityLogs();
+      setLogs(Array.isArray(data?.logs) ? data.logs : []);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Unable to load security audit logs.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -357,29 +498,39 @@ function LockedAccountsPanel() {
   };
 
   useEffect(() => {
-    fetchLockedUsers();
+    fetchLogs();
   }, []);
 
-  const handleUnlock = async (userId) => {
-    const token = localStorage.getItem('token');
-
-    if (!token) {
-      setError('SuperAdmin session not found. Please sign in again.');
+  const handleClear = async () => {
+    if (!window.confirm('WARNING: Are you sure you want to CLEAR all security audit logs? This action is permanent and cannot be undone.')) {
       return;
     }
-
-    setUnlockingUserId(userId);
     setError('');
-    setSuccessMessage('');
-
+    setSuccess('');
     try {
-      await unlockUser(userId);
-      setSuccessMessage('User unlocked successfully.');
-      await fetchLockedUsers({ silent: true });
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || requestError.message || 'Unable to unlock user.');
+      await clearSecurityLogs();
+      setSuccess('Audit logs cleared successfully.');
+      await fetchLogs({ silent: true });
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Unable to clear audit logs.');
+    }
+  };
+
+  const handleBanIp = async (e) => {
+    e.preventDefault();
+    setBanningIp(true);
+    setError('');
+    setSuccess('');
+    try {
+      const { api } = await import('../services/api');
+      await api.post('/auth/ip/ban', { ipAddress: ipForm.ipAddress, reason: ipForm.reason });
+      setSuccess(`IP Address ${ipForm.ipAddress} successfully banned.`);
+      setIpForm({ ipAddress: '', reason: '' });
+      await fetchLogs({ silent: true });
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Unable to ban IP address.');
     } finally {
-      setUnlockingUserId('');
+      setBanningIp(false);
     }
   };
 
@@ -400,46 +551,324 @@ function LockedAccountsPanel() {
             className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl"
             style={{
               background: isDark
-                ? 'linear-gradient(135deg, rgba(248,113,113,0.18), rgba(248,113,113,0.08))'
-                : 'linear-gradient(135deg, rgba(220,60,60,0.12), rgba(220,60,60,0.05))',
+                ? 'linear-gradient(135deg, rgba(220,60,50,0.18), rgba(220,60,50,0.08))'
+                : 'linear-gradient(135deg, rgba(220,60,50,0.12), rgba(220,60,50,0.05))',
             }}
           >
-            <UserX size={18} style={{ color: isDark ? '#FCA5A5' : '#B91C1C' }} />
+            <ShieldAlert size={18} style={{ color: '#EF4444' }} />
           </div>
           <div>
             <h3 className="font-display text-xl font-bold" style={{ color: colors.text }}>
-              Locked Accounts Management
+              Forensic Threat &amp; Audit Logs
             </h3>
             <p className="text-[11px]" style={{ color: colors.textSecondary }}>
-              Review locked users and restore access after security verification.
+              Review security audit logs, clear audit logs, and blacklist IP addresses.
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => fetchLockedUsers({ silent: true })}
-          disabled={loading || refreshing}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-[12px] font-bold transition-all duration-200 disabled:opacity-60"
-          style={{
-            borderColor: colors.border,
-            color: colors.text,
-            backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1',
-          }}
-        >
-          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-          Refresh List
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleClear}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-[12px] font-bold transition-all duration-200"
+            style={{
+              borderColor: 'rgba(220,60,50,0.2)',
+              backgroundColor: 'rgba(220,60,50,0.08)',
+              color: '#EF4444',
+            }}
+          >
+            Clear Audit Logs
+          </button>
+          <button
+            type="button"
+            onClick={() => fetchLogs({ silent: true })}
+            disabled={loading || refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-[12px] font-bold transition-all duration-200 disabled:opacity-60"
+            style={{
+              borderColor: colors.border,
+              color: colors.text,
+              backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1',
+            }}
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium" style={{ borderColor: '#D98B8B', backgroundColor: 'rgba(220,100,100,0.10)', color: '#B55B5B' }}>
+          {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium" style={{ borderColor: '#88C9A0', backgroundColor: 'rgba(100,200,140,0.10)', color: '#2F7A52' }}>
+          {success}
+        </div>
+      )}
+
+      {/* IP Blacklist Form */}
+      <form onSubmit={handleBanIp} className="mb-6 p-4 rounded-2xl border" style={{ borderColor: colors.border, backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#FCFAF6' }}>
+        <h4 className="text-sm font-bold mb-3" style={{ color: colors.text }}>Blacklist IP Address</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>IP Address</label>
+            <input type="text" required placeholder="e.g. 192.168.1.100" value={ipForm.ipAddress} onChange={e => setIpForm({...ipForm, ipAddress: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>Reason</label>
+            <input type="text" placeholder="e.g. Repeated brute-force attempts" value={ipForm.reason} onChange={e => setIpForm({...ipForm, reason: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <button type="submit" disabled={banningIp} className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50" style={{ backgroundColor: '#EF4444' }}>
+            {banningIp ? 'Blacklisting...' : 'Blacklist IP'}
+          </button>
+        </div>
+      </form>
+
+      {loading ? (
+        <div className="flex min-h-[200px] items-center justify-center">
+          <div className="flex items-center gap-3 text-sm font-medium" style={{ color: colors.textSecondary }}>
+            <RefreshCw size={16} className="animate-spin" />
+            Loading forensic logs...
+          </div>
+        </div>
+      ) : logs.length === 0 ? (
+        <div className="flex min-h-[200px] items-center justify-center text-sm font-bold" style={{ color: colors.textSecondary }}>
+          No security events logged.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-3xl border" style={{ borderColor: colors.border }}>
+          <div className="overflow-x-auto">
+            <div className="max-h-[350px] overflow-y-auto pr-1 scrollbar-hidden">
+              <table className="min-w-full border-collapse">
+                <thead className="sticky top-0 z-10" style={{ backgroundColor: isDark ? '#4E4238' : '#FAF7F1' }}>
+                  <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
+                    {['Timestamp', 'Event Type', 'Description', 'IP Address'].map((label) => (
+                      <th key={label} className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: colors.textSecondary }}>{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map((log, index) => (
+                    <tr key={log._id || index} style={{ borderBottom: index < logs.length - 1 ? `1px solid ${colors.border}` : 'none', backgroundColor: index % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.015)' : 'rgba(248,246,240,0.65)') }}>
+                      <td className="px-4 py-3 text-sm font-mono" style={{ color: colors.textSecondary }}>
+                        {new Date(log.timestamp).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          log.eventType.includes('BANNED') || log.eventType.includes('FAILED') || log.eventType.includes('LOCKED')
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        }`}>
+                          {log.eventType}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold max-w-[300px] truncate" style={{ color: colors.text }}>
+                        {log.description}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-mono" style={{ color: colors.textSecondary }}>
+                        {log.ipAddress || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserManagementPanel() {
+  const { isDark, colors } = useTheme();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [unlockingUserId, setUnlockingUserId] = useState('');
+  const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState({ username: '', email: '', password: '', role: 'customer' });
+  const [creating, setCreating] = useState(false);
+
+  const fetchUsers = async ({ silent = false } = {}) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setError('SuperAdmin session not found. Please sign in again.');
+      setUsers([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+    setError('');
+
+    try {
+      const data = await getAllUsers();
+      setUsers(Array.isArray(data?.users) ? data.users : []);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Unable to load accounts.');
+      setUsers([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleUnlock = async (userId) => {
+    setUnlockingUserId(userId);
+    setError('');
+    setSuccessMessage('');
+    try {
+      await unlockUser(userId);
+      setSuccessMessage('User unlocked successfully.');
+      await fetchUsers({ silent: true });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Unable to unlock user.');
+    } finally {
+      setUnlockingUserId('');
+    }
+  };
+
+  const handleBan = async (userId) => {
+    if (!window.confirm('Are you sure you want to BAN this user? This will lock them out of the system immediately.')) {
+      return;
+    }
+    setError('');
+    setSuccessMessage('');
+    const targetUser = users.find(u => u._id === userId);
+    const username = targetUser ? targetUser.username : 'Unknown';
+    try {
+      await banUser(userId);
+      setSuccessMessage('User account successfully banned.');
+      triggerDesktopNotification('🔒 Account Locked', `Account ${username} has been locked.`, {
+        tag: 'account-lock-alert'
+      });
+      await fetchUsers({ silent: true });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Unable to ban user.');
+    }
+  };
+
+  const handleUnban = async (userId) => {
+    if (!window.confirm('Are you sure you want to UNBAN this user?')) {
+      return;
+    }
+    setError('');
+    setSuccessMessage('');
+    const targetUser = users.find(u => u._id === userId);
+    const username = targetUser ? targetUser.username : 'Unknown';
+    try {
+      await unbanUser(userId);
+      setSuccessMessage('User account successfully unbanned.');
+      triggerDesktopNotification('🔓 Account Unlocked', `Account ${username} has been unlocked.`, {
+        tag: 'account-lock-alert'
+      });
+      await fetchUsers({ silent: true });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Unable to unban user.');
+    }
+  };
+
+  const handleCreateCustomer = async (e) => {
+    e.preventDefault();
+    setCreating(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      await createCustomerAccount({
+        username: createForm.username,
+        email: createForm.email,
+        password: createForm.password,
+        role: createForm.role,
+      });
+      setSuccessMessage('Customer account created successfully.');
+      setCreateForm({ username: '', email: '', password: '', role: 'customer' });
+      setShowCreateForm(false);
+      await fetchUsers({ silent: true });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || requestError.message || 'Unable to create account.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-3xl border p-6 transition-all duration-300"
+      style={{
+        backgroundColor: isDark ? colors.card : '#FFFFFF',
+        borderColor: colors.border,
+        boxShadow: isDark
+          ? '0 8px 24px rgba(0,0,0,0.16)'
+          : '0 10px 30px rgba(155,124,84,0.08)',
+      }}
+    >
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-5">
+        <div className="flex items-start gap-3">
+          <div
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl"
+            style={{
+              background: isDark
+                ? 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(16,185,129,0.08))'
+                : 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(16,185,129,0.05))',
+            }}
+          >
+            <UserX size={18} style={{ color: isDark ? '#6EE7B7' : '#059669' }} />
+          </div>
+          <div>
+            <h3 className="font-display text-xl font-bold" style={{ color: colors.text }}>
+              User Management
+            </h3>
+            <p className="text-[11px]" style={{ color: colors.textSecondary }}>
+              Create accounts and manage access permissions.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-[12px] font-bold transition-all duration-200"
+            style={{
+              borderColor: colors.border,
+              backgroundColor: isDark ? colors.accentBg : '#eef8f2',
+              color: isDark ? colors.accent : '#059669',
+            }}
+          >
+            Create Customer Account
+          </button>
+          <button
+            type="button"
+            onClick={() => fetchUsers({ silent: true })}
+            disabled={loading || refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-[12px] font-bold transition-all duration-200 disabled:opacity-60"
+            style={{
+              borderColor: colors.border,
+              color: colors.text,
+              backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1',
+            }}
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       {error && (
         <div
           className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium"
-          style={{
-            borderColor: '#D98B8B',
-            backgroundColor: 'rgba(220,100,100,0.10)',
-            color: '#B55B5B',
-          }}
+          style={{ borderColor: '#D98B8B', backgroundColor: 'rgba(220,100,100,0.10)', color: '#B55B5B' }}
         >
           {error}
         </div>
@@ -448,108 +877,109 @@ function LockedAccountsPanel() {
       {successMessage && (
         <div
           className="mb-4 rounded-2xl border px-4 py-3 text-sm font-medium"
-          style={{
-            borderColor: '#88C9A0',
-            backgroundColor: 'rgba(100,200,140,0.10)',
-            color: '#2F7A52',
-          }}
+          style={{ borderColor: '#88C9A0', backgroundColor: 'rgba(100,200,140,0.10)', color: '#2F7A52' }}
         >
           {successMessage}
         </div>
+      )}
+
+      {showCreateForm && (
+        <form onSubmit={handleCreateCustomer} className="mb-6 p-4 rounded-2xl border" style={{ borderColor: colors.border, backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#FCFAF6' }}>
+          <h4 className="text-sm font-bold mb-4" style={{ color: colors.text }}>Create New Account</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>Username</label>
+              <input type="text" required value={createForm.username} onChange={e => setCreateForm({...createForm, username: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>Email</label>
+              <input type="email" required value={createForm.email} onChange={e => setCreateForm({...createForm, email: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>Password</label>
+              <input type="password" required minLength={8} value={createForm.password} onChange={e => setCreateForm({...createForm, password: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.textSecondary }}>Role</label>
+              <select value={createForm.role} onChange={e => setCreateForm({...createForm, role: e.target.value})} className="w-full rounded-xl border px-3 py-2 text-sm outline-none transition-colors" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : '#fff', borderColor: colors.border, color: colors.text }}>
+                <option value="customer">HomeOwner</option>
+                <option value="guest">Guest</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setShowCreateForm(false)} className="px-4 py-2 rounded-xl text-sm font-bold transition-colors" style={{ color: colors.textSecondary }}>Cancel</button>
+            <button type="submit" disabled={creating} className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50" style={{ backgroundColor: isDark ? colors.accent : '#059669' }}>
+              {creating ? 'Creating...' : 'Create Account'}
+            </button>
+          </div>
+        </form>
       )}
 
       {loading ? (
         <div className="flex min-h-[220px] items-center justify-center">
           <div className="flex items-center gap-3 text-sm font-medium" style={{ color: colors.textSecondary }}>
             <RefreshCw size={16} className="animate-spin" />
-            Loading locked accounts...
+            Loading accounts...
           </div>
         </div>
-      ) : lockedUsers.length === 0 ? (
-        <div
-          className="flex min-h-[220px] flex-col items-center justify-center rounded-3xl border border-dashed px-6 text-center"
-          style={{
-            borderColor: colors.border,
-            backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : '#FCFAF6',
-          }}
-        >
-          <ShieldCheck size={24} style={{ color: isDark ? colors.accent : '#1A4D2E' }} />
-          <p className="mt-4 text-base font-bold" style={{ color: colors.text }}>
-            No locked accounts found. System is secure!
-          </p>
-          <p className="mt-2 max-w-md text-sm" style={{ color: colors.textSecondary }}>
-            Every user account is currently accessible and no administrative unlock action is required.
-          </p>
+      ) : users.length === 0 ? (
+        <div className="flex min-h-[220px] items-center justify-center text-sm font-bold" style={{ color: colors.textSecondary }}>
+          No accounts found.
         </div>
       ) : (
         <div className="overflow-hidden rounded-3xl border" style={{ borderColor: colors.border }}>
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse">
-              <thead
-                style={{
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1',
-                }}
-              >
+              <thead style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FAF7F1' }}>
                 <tr>
-                  {['Username', 'Email', 'Failed Attempts', 'Last Login IP', 'Action'].map((label) => (
-                    <th
-                      key={label}
-                      className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider"
-                      style={{ color: colors.textSecondary }}
-                    >
-                      {label}
-                    </th>
+                  {['Username', 'Email', 'Role', 'Failed Attempts', 'Status', 'Action'].map((label) => (
+                    <th key={label} className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: colors.textSecondary }}>{label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {lockedUsers.map((user, index) => (
-                  <tr
-                    key={user._id}
-                    style={{
-                      borderTop: `1px solid ${colors.border}`,
-                      backgroundColor: index % 2 === 0
-                        ? 'transparent'
-                        : (isDark ? 'rgba(255,255,255,0.015)' : 'rgba(248,246,240,0.65)'),
-                    }}
-                  >
-                    <td className="px-4 py-4 text-sm font-semibold" style={{ color: colors.text }}>
-                      {user.username}
-                    </td>
-                    <td className="px-4 py-4 text-sm" style={{ color: colors.textSecondary }}>
-                      {user.email}
-                    </td>
-                    <td className="px-4 py-4 text-sm font-semibold" style={{ color: colors.text }}>
-                      {user.failedLoginAttempts}
-                    </td>
-                    <td className="px-4 py-4 text-sm" style={{ color: colors.textSecondary }}>
-                      {user.lastLoginIP || 'Not available'}
+                {users.map((user, index) => (
+                  <tr key={user._id} style={{ borderTop: `1px solid ${colors.border}`, backgroundColor: index % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.015)' : 'rgba(248,246,240,0.65)') }}>
+                    <td className="px-4 py-4 text-sm font-semibold" style={{ color: colors.text }}>{user.username}</td>
+                    <td className="px-4 py-4 text-sm" style={{ color: colors.textSecondary }}>{user.email}</td>
+                    <td className="px-4 py-4 text-sm" style={{ color: colors.textSecondary }}>{user.role}</td>
+                    <td className="px-4 py-4 text-sm font-semibold" style={{ color: colors.text }}>{user.failedLoginAttempts}</td>
+                    <td className="px-4 py-4 text-sm">
+                      {user.isLocked ? (
+                        <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">Locked</span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Active</span>
+                      )}
                     </td>
                     <td className="px-4 py-4">
-                      <button
-                        type="button"
-                        onClick={() => handleUnlock(user._id)}
-                        disabled={unlockingUserId === user._id}
-                        className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[12px] font-bold transition-all duration-200 disabled:opacity-60"
-                        style={{
-                          background: isDark
-                            ? 'linear-gradient(135deg, rgba(197,168,128,0.22), rgba(197,168,128,0.12))'
-                            : 'linear-gradient(135deg, #E8F2EC, #DDEEE4)',
-                          color: isDark ? colors.accent : '#1A4D2E',
-                        }}
-                      >
-                        {unlockingUserId === user._id ? (
-                          <>
-                            <RefreshCw size={13} className="animate-spin" />
-                            Unlocking...
-                          </>
-                        ) : (
-                          <>
-                            <LockOpen size={13} />
-                            Unlock Account
-                          </>
-                        )}
-                      </button>
+                      {user.role === 'admin' || user.role === 'SuperAdmin' ? (
+                        <span className="text-[10px] uppercase tracking-wider font-bold opacity-40">Protected</span>
+                      ) : user.isLocked ? (
+                        <button
+                          type="button"
+                          onClick={() => handleUnban(user._id)}
+                          className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-bold transition-all duration-200"
+                          style={{
+                            background: isDark ? 'linear-gradient(135deg, rgba(16,185,129,0.22), rgba(16,185,129,0.12))' : 'linear-gradient(135deg, #E8F2EC, #DDEEE4)',
+                            color: isDark ? '#6EE7B7' : '#1A4D2E',
+                          }}
+                        >
+                          <LockOpen size={12} /> Unban
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleBan(user._id)}
+                          className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-bold transition-all duration-200"
+                          style={{
+                            background: isDark ? 'linear-gradient(135deg, rgba(220,60,50,0.2), rgba(220,60,50,0.1))' : 'linear-gradient(135deg, #FCE8E6, #FADCD9)',
+                            color: '#EF4444',
+                          }}
+                        >
+                          <UserX size={12} /> Ban
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -563,7 +993,7 @@ function LockedAccountsPanel() {
 }
 
 // ── MAIN ──────────────────────────────────────────────────────
-export default function SecurityView({ sensorData, commandLog }) {
+export default function SecurityView({ sensorData, commandLog, publish }) {
   const { isDark, colors } = useTheme();
   const { motion: pir } = sensorData;  // renamed: avoids shadowing framer-motion's `motion`
 
@@ -600,7 +1030,7 @@ export default function SecurityView({ sensorData, commandLog }) {
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_360px]">
           <AlertLog liveEntries={liveAlerts} />
           <div className="space-y-5">
-            <BiometricLockCard />
+            <SmartDoorLockCard publish={publish} />
 
             {/* MQTTS detail card */}
             <div
@@ -643,11 +1073,20 @@ export default function SecurityView({ sensorData, commandLog }) {
 
       <section>
         <SectionHeader
-          icon={UserX}
-          title="Locked Accounts"
-          subtitle="SuperAdmin recovery controls for security-triggered account lockouts"
+          icon={ShieldAlert}
+          title="Threat Management"
+          subtitle="Clear forensic logs, audit active sessions, and blacklist IP addresses"
         />
-        <LockedAccountsPanel />
+        <ThreatManagementPanel />
+      </section>
+
+      <section>
+        <SectionHeader
+          icon={UserX}
+          title="User Management"
+          subtitle="Manage user accounts, roles, and security lockouts"
+        />
+        <UserManagementPanel />
       </section>
     </motion.div>
   );

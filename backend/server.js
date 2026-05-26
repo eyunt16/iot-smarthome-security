@@ -13,6 +13,7 @@ const {
   requireHomeOwner,
   requireSuperAdmin,
 } = require('./middleware/rbac');
+const { sanitizeInput } = require('./middleware/sanitize');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
@@ -84,6 +85,32 @@ app.use(
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 
+// Global IP Ban Verification Middleware
+async function checkIpBan(req, res, next) {
+  try {
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const clientIp = typeof forwardedFor === 'string' && forwardedFor.trim() 
+      ? forwardedFor.split(',')[0].trim() 
+      : (req.ip || req.socket?.remoteAddress || null);
+      
+    if (clientIp) {
+      const IpBan = require('./models/IpBan');
+      const isBanned = await IpBan.findOne({ ipAddress: clientIp });
+      if (isBanned) {
+        return res.status(403).json({
+          message: 'Access denied. Your IP address has been banned by the administrator.',
+        });
+      }
+    }
+    next();
+  } catch (err) {
+    next();
+  }
+}
+
+app.use(checkIpBan);
+app.use(sanitizeInput);
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: Number(process.env.RATE_LIMIT_MAX) || 200,
@@ -104,6 +131,16 @@ const authLimiter = rateLimit({
   },
 });
 
+const pinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    message: 'Too many incorrect PIN attempts. Please try again after 15 minutes.',
+  },
+});
+
 app.get('/health', (_req, res) => {
   return res.status(200).json({
     status: 'ok',
@@ -114,6 +151,56 @@ app.get('/health', (_req, res) => {
 
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter, authRoutes);
+
+// Store global mqttClient reference for backend publishing
+let globalMqttClient = null;
+
+app.post('/api/auth/door/unlock', authenticateJWT, pinLimiter, async (req, res) => {
+  try {
+    const { pin } = req.body;
+    if (!pin) {
+      return res.status(400).json({ message: 'PIN code is required.' });
+    }
+
+    const SecurityLog = require('./models/SecurityLog');
+
+    if (pin !== '1234') {
+      // Log failed PIN attempt
+      await SecurityLog.create({
+        eventType: 'LOGIN_FAILED',
+        description: `Failed Smart Door Lock unlock attempt by user ${req.user.username}. Invalid PIN entered.`,
+        ipAddress: req.ip || null,
+        timestamp: new Date()
+      });
+      return res.status(401).json({ message: 'Incorrect PIN. Access Denied.' });
+    }
+
+    // Success! Log door unlocked
+    await SecurityLog.create({
+      eventType: 'DOOR_UNLOCKED',
+      description: `Smart Door Lock successfully unlocked by user ${req.user.username}.`,
+      ipAddress: req.ip || null,
+      timestamp: new Date()
+    });
+
+    // Publish to HiveMQ Cloud MQTTS
+    if (globalMqttClient && globalMqttClient.connected) {
+      globalMqttClient.publish('home/door/control', 'unlock', { qos: 1 }, (err) => {
+        if (err) {
+          console.error('[MQTT Backend] Failed to publish door unlock:', err);
+        } else {
+          console.log('[MQTT Backend] Successfully published door unlock to home/door/control');
+        }
+      });
+    } else {
+      console.warn('[MQTT Backend] Broker not connected, simulating door unlock publish.');
+    }
+
+    return res.status(200).json({ message: 'PIN verified. Door Unlocked successfully.' });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
 
 app.get('/api/secure/guest', authenticateJWT, requireGuest, (req, res) => {
   return res.status(200).json({
@@ -213,6 +300,25 @@ async function startServer() {
   try {
     await connectDB();
 
+    // --- AUTOMATIC SUPERADMIN DATABASE SEEDING ---
+    const User = require('./models/User');
+    const userCount = await User.countDocuments();
+    if (userCount === 0) {
+      console.info('[SEED] No users found in database. Automatically creating SuperAdmin account...');
+      const bcrypt = require('bcryptjs');
+      const passwordHash = await bcrypt.hash('admin@123456', 12);
+      await User.create({
+        username: 'admin',
+        email: 'admin@smarthome.com',
+        passwordHash,
+        role: 'admin',
+        failedLoginAttempts: 0,
+        isLocked: false,
+        lastLoginIP: null,
+      });
+      console.info('[SEED] Auto-seeded SuperAdmin: admin / admin@123456');
+    }
+
     server = app.listen(PORT, () => {
       console.info(`Server listening on port ${PORT}`);
     });
@@ -224,10 +330,151 @@ async function startServer() {
       clientId: 'TuyenHome_Backend_' + Math.random().toString(16).slice(2, 10)
     });
 
+    globalMqttClient = mqttClient;
+
     mqttClient.on('connect', () => {
       console.log('✅ Backend successfully connected to HiveMQ Cloud!');
+      
+      // Subscribe to relevant topics
+      mqttClient.subscribe(['home/motion', 'tuyenhome/env/#', 'home/door/control'], { qos: 1 }, (err) => {
+        if (err) {
+          console.error('❌ Backend MQTT subscribe error:', err);
+        } else {
+          console.log('✅ Backend successfully subscribed to home/motion, tuyenhome/env/#, home/door/control');
+        }
+      });
+
       // Trigger the virtual data factory
       startHouseDataEmulation(mqttClient);
+    });
+
+    mqttClient.on('message', async (topic, message) => {
+      const payloadText = message.toString();
+      console.log(`[MQTT Backend] Topic: ${topic} | Payload: ${payloadText}`);
+
+      try {
+        const Setting = require('./models/Setting');
+        let settings = await Setting.findOne();
+        if (!settings) {
+          settings = await Setting.create({ notif: true, datalog: true, emailalert: false });
+        }
+
+        if (topic === 'home/motion') {
+          if (payloadText === '1') {
+            // 1. Data Logging
+            if (settings.datalog) {
+              const SecurityLog = require('./models/SecurityLog');
+              await SecurityLog.create({
+                eventType: 'DEVICE_TRIGGERED',
+                description: 'Motion detected via PIR passive infrared sensor.',
+                resolved: false,
+                timestamp: new Date(),
+              });
+              console.log('[MQTT Backend] Logged intrusion/motion event to DB.');
+            }
+
+            // 2. Email Alerts
+            if (settings.emailalert) {
+              const { sendSecurityAlert } = require('./utils/emailAlert');
+              await sendSecurityAlert({
+                subject: '[CRITICAL ALERT] PIR Motion Detected!',
+                title: 'Motion Detected',
+                message: 'PIR Passive Infrared Sensor HC-SR501 has detected motion at your residence. Please verify your security cameras and dashboard immediately.',
+                metadata: {
+                  sensor: 'PIR HC-SR501',
+                  status: 'Alert',
+                  actionRequired: 'Verify Smart Home Dashboard',
+                },
+              });
+              console.log('[MQTT Backend] Sent motion detected security alert email.');
+            }
+
+            // 3. Push Notifications to Admins
+            try {
+              const User = require('./models/User');
+              const { sendPushNotification } = require('./utils/pushNotification');
+              const admins = await User.find({ role: { $in: ['admin', 'SuperAdmin'] } });
+              const tokens = admins.reduce((acc, curr) => acc.concat(curr.expoPushTokens || []), []);
+              if (tokens.length > 0) {
+                await sendPushNotification(
+                  tokens,
+                  '🚨 Intrusion Detected',
+                  'Motion near the PIR sensor!'
+                );
+                console.log('[MQTT Backend] Sent push notifications to admins.');
+              }
+            } catch (pushErr) {
+              console.error('[MQTT Backend] Failed to send push notification:', pushErr);
+            }
+          }
+        } else if (topic.startsWith('tuyenhome/env/')) {
+          // Room environment telemetry logging
+          if (settings.datalog) {
+            const room = topic.split('/')[2]; // livingroom, bedroom, kitchen
+            const data = JSON.parse(payloadText);
+            
+            const SensorLog = require('./models/SensorLog');
+            
+            // Helper to get or create Node & Device dynamically
+            const getOrCreateNodeAndDevice = async (roomName, metricName) => {
+              const Node = require('./models/Node');
+              const Device = require('./models/Device');
+
+              const formattedNodeId = `NODE_${roomName.toUpperCase()}`;
+              let node = await Node.findOne({ nodeId: formattedNodeId });
+              if (!node) {
+                node = await Node.create({
+                  nodeId: formattedNodeId,
+                  name: `${roomName.charAt(0).toUpperCase() + roomName.slice(1)} Node`,
+                  location: roomName.charAt(0).toUpperCase() + roomName.slice(1),
+                  status: 'Online',
+                  lastHeartbeat: new Date(),
+                });
+              }
+
+              const deviceName = `${metricName.toUpperCase()}_SENSOR`;
+              let device = await Device.findOne({ nodeId: node._id, deviceName });
+              if (!device) {
+                device = await Device.create({
+                  nodeId: node._id,
+                  deviceName,
+                  type: 'Sensor',
+                  currentValue: null,
+                  pin: metricName === 'temperature' ? 4 : 5,
+                });
+              }
+
+              return { nodeId: node._id, deviceId: device._id };
+            };
+
+            if (data.temperature !== undefined) {
+              const { nodeId, deviceId } = await getOrCreateNodeAndDevice(room, 'temperature');
+              await SensorLog.create({
+                nodeId,
+                deviceId,
+                metric: 'temperature',
+                value: Number(data.temperature),
+                timestamp: new Date(),
+              });
+            }
+
+            if (data.humidity !== undefined) {
+              const { nodeId, deviceId } = await getOrCreateNodeAndDevice(room, 'humidity');
+              await SensorLog.create({
+                nodeId,
+                deviceId,
+                metric: 'humidity',
+                value: Number(data.humidity),
+                timestamp: new Date(),
+              });
+            }
+            
+            console.log(`[MQTT Backend] Telemetry for room [${room}] successfully logged to DB.`);
+          }
+        }
+      } catch (error) {
+        console.error('[MQTT Backend] Error processing message:', error);
+      }
     });
 
     mqttClient.on('error', (err) => {
@@ -273,50 +520,5 @@ process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 startServer();
-```js
-function startHouseDataEmulation(mqttClient) {
-  const nodes = [
-    {
-      name: 'Living Room',
-      topic: 'tuyenhome/env/livingroom',
-      baseTemp: 27.5,
-      baseHumidity: 60,
-    },
-    {
-      name: 'Master Bedroom',
-      topic: 'tuyenhome/env/bedroom',
-      baseTemp: 24.0,
-      baseHumidity: 55,
-    },
-    {
-      name: 'Kitchen',
-      topic: 'tuyenhome/env/kitchen',
-      baseTemp: 31.2,
-      baseHumidity: 70,
-    },
-  ];
 
-  setInterval(() => {
-    nodes.forEach((node) => {
-      const temperature = (node.baseTemp + (Math.random() - 0.5) * 1.6).toFixed(1);
-      const humidity = (node.baseHumidity + (Math.random() - 0.5) * 1.6).toFixed(1);
-
-      const payload = {
-        temperature,
-        humidity,
-      };
-
-      mqttClient.publish(node.topic, JSON.stringify(payload), { qos: 1 }, (err) => {
-        if (err) {
-          console.error(`[Emulation] Error publishing ${node.name}:`, err);
-        } else {
-          console.log(`[Emulation] Published ${node.name}: temperature=${temperature}°C, humidity=${humidity}%`);
-        }
-      });
-    });
-  }, 5000);
-}
-
-module.exports = { startHouseDataEmulation };
-```
 module.exports = app;

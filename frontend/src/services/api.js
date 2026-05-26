@@ -66,3 +66,35 @@ export async function getLockedUsers() {
 export async function unlockUser(userId) {
   return api.patch(`/auth/users/${userId}/unlock`);
 }
+
+export async function getAllUsers() {
+  return api.get('/auth/users');
+}
+
+export async function createCustomerAccount(payload) {
+  return api.post('/auth/users/customer', payload);
+}
+
+export async function changePassword(payload) {
+  return api.put('/auth/change-password', payload);
+}
+
+export async function getSecurityLogs() {
+  return api.get('/auth/logs');
+}
+
+export async function clearSecurityLogs() {
+  return api.delete('/auth/logs');
+}
+
+export async function banUser(userId) {
+  return api.post(`/auth/users/${userId}/ban`);
+}
+
+export async function unbanUser(userId) {
+  return api.post(`/auth/users/${userId}/unban`);
+}
+
+export async function unlockDoor(pin) {
+  return api.post('/auth/door/unlock', { pin });
+}
