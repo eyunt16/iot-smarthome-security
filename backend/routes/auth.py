@@ -191,6 +191,36 @@ def create_customer_account():
     else:
         return jsonify({'status': 'error', 'message': 'Unable to create account.'}), 500
 
+@auth_bp.route('/api/auth/users', methods=['GET'])
+def get_all_users():
+    """Fetch all users from SQLite database for User Management compatibility."""
+    try:
+        conn = sqlite3.connect(config.DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT id, username, role, is_active FROM users ORDER BY created_at DESC")
+        rows = c.fetchall()
+        conn.close()
+
+        users_list = []
+        for row in rows:
+            users_list.append({
+                '_id': str(row['id']),
+                'username': row['username'],
+                'email': f"{row['username']}@example.com",
+                'role': row['role'],
+                'failedLoginAttempts': 0,
+                'isLocked': False
+            })
+
+        return jsonify({
+            'count': len(users_list),
+            'users': users_list
+        }), 200
+    except Exception as e:
+        print(f"❌ Error listing users: {e}")
+        return jsonify({'message': 'Unable to fetch users.'}), 500
+
 @auth_bp.route('/api/auth/users/<user_id>/ban', methods=['POST'])
 def ban_user(user_id):
     """Compatibility endpoint for user banning."""
