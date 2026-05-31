@@ -407,7 +407,7 @@ async function startServer() {
         username: 'admin',
         email: 'admin@smarthome.com',
         passwordHash,
-        role: 'admin',
+        role: 'SuperAdmin',
         failedLoginAttempts: 0,
         isLocked: false,
         lastLoginIP: null,

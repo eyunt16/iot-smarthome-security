@@ -216,8 +216,6 @@ async function login(req, res) {
 
     return res.status(500).json({
       message: 'Unable to complete login request.',
-      debugMessage: error.message,
-      debugStack: error.stack,
     });
   }
 }

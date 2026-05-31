@@ -19,7 +19,7 @@ async function seedUsers() {
       username: adminUsername,
       email: adminEmail,
       passwordHash: adminHash,
-      role: 'admin',
+      role: 'SuperAdmin',
       failedLoginAttempts: 0,
       isLocked: false,
       lastLoginIP: null,
