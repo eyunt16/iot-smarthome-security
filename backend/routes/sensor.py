@@ -226,6 +226,10 @@ def control_light(light_num):
             json.dumps(command_payload)
         )
         
+        # Also publish plain text command to home/door/control for ESP8266 relay compatibility
+        state_text = "unlock" if brightness > 0 else "lock"
+        publish_message("home/door/control", state_text)
+        
         if success:
             return jsonify({
                 "status": "success",
