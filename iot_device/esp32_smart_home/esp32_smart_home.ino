@@ -28,12 +28,16 @@ const uint16_t HIVEMQ_PORT = 8883;
 const char* HIVEMQ_USERNAME = "Tuyen";
 const char* HIVEMQ_PASSWORD = "123456789tT";
 
-// Chan phan cung thuc te
 static const uint8_t DHT_PIN = 15;
 static const uint8_t DHT_TYPE = DHT11;
 static const uint8_t PIR_PIN = 33;
 static const uint8_t LDR_PIN = 32;
 static const uint8_t RELAY_LED_PIN = 17;
+
+// Configuration for connection status LED (GPIO 2 on ESP32, active high)
+#define STATUS_LED_PIN 2
+#define LED_ON HIGH
+#define LED_OFF LOW
 
 // MQTT topics
 const char* TOPIC_TEMP = "tuyenhome/sensor/temperature";
@@ -106,17 +110,17 @@ bool outputState = false;
 // ==========================================================================================================
 const char* mqttStateToText(int8_t state) {
   switch (state) {
-    case MQTT_CONNECTION_TIMEOUT: return "Het thoi gian ket noi";
-    case MQTT_CONNECTION_LOST: return "Mat ket noi MQTT";
-    case MQTT_CONNECT_FAILED: return "Loi mang hoac bat tay TLS";
-    case MQTT_DISCONNECTED: return "Client dang ngat ket noi";
-    case MQTT_CONNECTED: return "Da ket noi";
-    case MQTT_CONNECT_BAD_PROTOCOL: return "Sai giao thuc MQTT";
-    case MQTT_CONNECT_BAD_CLIENT_ID: return "Client ID khong hop le";
-    case MQTT_CONNECT_UNAVAILABLE: return "Broker tam thoi khong san sang";
-    case MQTT_CONNECT_BAD_CREDENTIALS: return "Sai username/password";
-    case MQTT_CONNECT_UNAUTHORIZED: return "Khong duoc xac thuc";
-    default: return "Loi khong xac dinh";
+    case MQTT_CONNECTION_TIMEOUT: return "Connection timeout";
+    case MQTT_CONNECTION_LOST: return "MQTT connection lost";
+    case MQTT_CONNECT_FAILED: return "Network error or TLS handshake failed";
+    case MQTT_DISCONNECTED: return "Client disconnected";
+    case MQTT_CONNECTED: return "Connected";
+    case MQTT_CONNECT_BAD_PROTOCOL: return "Incorrect MQTT protocol";
+    case MQTT_CONNECT_BAD_CLIENT_ID: return "Invalid Client ID";
+    case MQTT_CONNECT_UNAVAILABLE: return "Broker temporarily unavailable";
+    case MQTT_CONNECT_BAD_CREDENTIALS: return "Incorrect username/password";
+    case MQTT_CONNECT_UNAUTHORIZED: return "Unauthorized";
+    default: return "Unknown error";
   }
 }
 
@@ -130,7 +134,7 @@ void syncClockForTLS() {
     return;
   }
 
-  Serial.println("[TLS] Dang dong bo thoi gian NTP de xac thuc chung chi...");
+  Serial.println("[TLS] Syncing NTP time to verify certificate...");
   configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER_1, NTP_SERVER_2);
 
   unsigned long startMs = millis();
@@ -141,16 +145,16 @@ void syncClockForTLS() {
   Serial.println();
 
   if (isTimeSynced()) {
-    Serial.println("[TLS] Dong bo gio thanh cong.");
+    Serial.println("[TLS] Time synchronized successfully.");
   } else {
-    Serial.println("[TLS] Khong dong bo duoc gio. Neu TLS fail, hay kiem tra Internet/NTP.");
+    Serial.println("[TLS] Failed to sync time. If TLS fails, check Internet/NTP.");
   }
 }
 
 void publishOutputState() {
   const char* stateText = outputState ? "ON" : "OFF";
   mqttClient.publish(TOPIC_LIGHT_STATE, stateText, true);
-  Serial.print("[MQTT] Da cap nhat trang thai output: ");
+  Serial.print("[MQTT] Output state updated: ");
   Serial.println(stateText);
 }
 
@@ -158,10 +162,10 @@ void applyOutputState(bool turnOn) {
   outputState = turnOn;
   digitalWrite(RELAY_LED_PIN, outputState ? HIGH : LOW);
 
-  Serial.print("[THIET BI] Output GPIO ");
+  Serial.print("[DEVICE] Output GPIO ");
   Serial.print(RELAY_LED_PIN);
   Serial.print(" -> ");
-  Serial.println(outputState ? "BAT" : "TAT");
+  Serial.println(outputState ? "ON" : "OFF");
 
   if (mqttClient.connected()) {
     publishOutputState();
@@ -177,29 +181,40 @@ void connectWiFi() {
   }
 
   Serial.println();
-  Serial.print("[WIFI] Dang ket noi toi SSID: ");
+  Serial.print("[WIFI] Connecting to SSID: ");
   Serial.println(WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  unsigned long startMs = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startMs < WIFI_CONNECT_TIMEOUT_MS) {
-    delay(500);
+  int retries = 0;
+  while (WiFi.status() != WL_CONNECTED && retries < 20) {
+    // Blink fast (200ms period: 100ms ON, 100ms OFF)
+    // 500ms delay per retry, so we can do two cycles of 200ms plus 100ms
+    digitalWrite(STATUS_LED_PIN, LED_ON);
+    delay(100);
+    digitalWrite(STATUS_LED_PIN, LED_OFF);
+    delay(100);
+    digitalWrite(STATUS_LED_PIN, LED_ON);
+    delay(100);
+    digitalWrite(STATUS_LED_PIN, LED_OFF);
+    delay(200);
+
     Serial.print(".");
+    retries++;
   }
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("[WIFI] Ket noi WiFi thanh cong.");
-    Serial.print("[WIFI] IP: ");
-    Serial.println(WiFi.localIP());
+    // FIX 3: After WiFi connects: "WiFi OK - IP: " + IP address
+    Serial.println("WiFi OK - IP: " + WiFi.localIP().toString());
     Serial.print("[WIFI] RSSI: ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
   } else {
-    Serial.print("[WIFI] Ket noi WiFi that bai. Ma trang thai: ");
-    Serial.println(WiFi.status());
+    Serial.println("[WIFI] WiFi connection failed. Restarting...");
+    delay(1000);
+    ESP.restart();
   }
 }
 
@@ -212,10 +227,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   memcpy(message, payload, copyLength);
   message[copyLength] = '\0';
 
-  Serial.print("[MQTT] Nhan du lieu topic ");
-  Serial.print(topic);
-  Serial.print(": ");
-  Serial.println(message);
+  Serial.println("Command received: " + String(topic) + " -> " + String(message));
 
   if (strcmp(topic, TOPIC_LIGHT_SET) == 0) {
     if (strcmp(message, "ON") == 0) {
@@ -223,7 +235,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     } else if (strcmp(message, "OFF") == 0) {
       applyOutputState(false);
     } else {
-      Serial.println("[MQTT] Lenh khong hop le. Chi chap nhan ON hoac OFF.");
+      Serial.println("[MQTT] Invalid command. Only ON or OFF is accepted.");
     }
   }
 }
@@ -232,59 +244,72 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 // MQTT RECONNECT
 // ==========================================================================================================
 bool reconnectMQTT() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[MQTT] Bo qua reconnect vi WiFi chua san sang.");
-    return false;
-  }
+  // Set the Root CA certificate before connecting
+  secureClient.setCACert(HIVEMQ_ROOT_CA);
 
-  syncClockForTLS();
+  // Make sure it uses port 8883
+  mqttClient.setServer(HIVEMQ_URL, 8883);
 
-  String clientId = "TuyenHome-ESP32-";
-  clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
-
-  Serial.println("[MQTT] Dang thu ket noi HiveMQ Cloud bang TLS...");
-  Serial.print("[MQTT] Broker: ");
-  Serial.println(HIVEMQ_URL);
-  Serial.print("[MQTT] Port: ");
-  Serial.println(HIVEMQ_PORT);
-  Serial.print("[MQTT] Client ID: ");
-  Serial.println(clientId);
-
-  bool connected = mqttClient.connect(
-    clientId.c_str(),
-    HIVEMQ_USERNAME,
-    HIVEMQ_PASSWORD
-  );
-
-  if (connected) {
-    Serial.println("[MQTT] Ket noi MQTTS thanh cong.");
-
-    mqttClient.publish(TOPIC_DEVICE_STATUS, "online", true);
-
-    if (mqttClient.subscribe(TOPIC_LIGHT_SET)) {
-      Serial.print("[MQTT] Da subscribe topic dieu khien: ");
-      Serial.println(TOPIC_LIGHT_SET);
-    } else {
-      Serial.println("[MQTT] Subscribe topic dieu khien that bai.");
+  while (!mqttClient.connected()) {
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi lost - reconnecting...");
+      return false;
     }
 
-    publishOutputState();
-    return true;
+    syncClockForTLS();
+
+    String clientId = "TuyenHome-ESP32-";
+    clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
+
+    Serial.println("[MQTT] Attempting to connect to HiveMQ Cloud using TLS...");
+    Serial.print("[MQTT] Client ID: ");
+    Serial.println(clientId);
+
+    bool connected = mqttClient.connect(
+      clientId.c_str(),
+      HIVEMQ_USERNAME,
+      HIVEMQ_PASSWORD
+    );
+
+    if (connected) {
+      Serial.println("MQTT Connected to HiveMQ");
+      // FIX 3: After MQTT connects: "MQTT OK - HiveMQ port 8883"
+      Serial.println("MQTT OK - HiveMQ port 8883");
+
+      // Stay ON solid when fully connected
+      digitalWrite(STATUS_LED_PIN, LED_ON);
+
+      mqttClient.publish(TOPIC_DEVICE_STATUS, "online", true);
+
+      if (mqttClient.subscribe(TOPIC_LIGHT_SET)) {
+        Serial.print("[MQTT] Subscribed to control topic: ");
+        Serial.println(TOPIC_LIGHT_SET);
+      } else {
+        Serial.println("[MQTT] Subscription to control topic failed.");
+      }
+
+      publishOutputState();
+      return true;
+    }
+
+    // Prints the exact error code if connection fails
+    int8_t state = mqttClient.state();
+    Serial.print("MQTT connection failed, error code: ");
+    Serial.print(state);
+    Serial.print(" | ");
+    Serial.println(mqttStateToText(state));
+
+    // Blink slow (1000ms: 500ms ON, 500ms OFF) while connecting/retrying
+    // Retries every 5 seconds, so we do 5 blinks of 1 second each
+    for (int i = 0; i < 5; i++) {
+      digitalWrite(STATUS_LED_PIN, LED_ON);
+      delay(500);
+      digitalWrite(STATUS_LED_PIN, LED_OFF);
+      delay(500);
+    }
   }
 
-  int8_t state = mqttClient.state();
-  Serial.print("[MQTT] Ket noi that bai. Ma loi = ");
-  Serial.print(state);
-  Serial.print(" | ");
-  Serial.println(mqttStateToText(state));
-
-  if (state == MQTT_CONNECT_FAILED) {
-    Serial.println("[MQTT] Goi y: kiem tra Root CA, gio he thong, URL broker, Internet, hoac TLS handshake.");
-  } else if (state == MQTT_CONNECT_BAD_CREDENTIALS || state == MQTT_CONNECT_UNAUTHORIZED) {
-    Serial.println("[MQTT] Goi y: kiem tra HIVEMQ_USERNAME va HIVEMQ_PASSWORD.");
-  }
-
-  return false;
+  return true;
 }
 
 // ==========================================================================================================
@@ -298,43 +323,34 @@ void publishSensorData() {
   int lightPercent = map(ldrRaw, 0, 4095, 0, 100);
   lightPercent = constrain(lightPercent, 0, 100);
 
-  Serial.println("[CAM BIEN] Doc du lieu phan cung thuc te...");
+  Serial.println("[SENSOR] Reading physical hardware data...");
 
   if (!isnan(temperature)) {
     char tempPayload[16];
     dtostrf(temperature, 0, 1, tempPayload);
     mqttClient.publish(TOPIC_TEMP, tempPayload, true);
-    Serial.print("[CAM BIEN] Nhiet do: ");
-    Serial.print(tempPayload);
-    Serial.println(" C");
+    Serial.println("Published: " + String(TOPIC_TEMP) + " -> " + String(tempPayload));
   } else {
-    Serial.println("[CAM BIEN] Loi doc DHT11 - nhiet do.");
+    Serial.println("[SENSOR] Error reading DHT11 - temperature.");
   }
 
   if (!isnan(humidity)) {
     char humidityPayload[16];
     dtostrf(humidity, 0, 1, humidityPayload);
     mqttClient.publish(TOPIC_HUMIDITY, humidityPayload, true);
-    Serial.print("[CAM BIEN] Do am: ");
-    Serial.print(humidityPayload);
-    Serial.println(" %");
+    Serial.println("Published: " + String(TOPIC_HUMIDITY) + " -> " + String(humidityPayload));
   } else {
-    Serial.println("[CAM BIEN] Loi doc DHT11 - do am.");
+    Serial.println("[SENSOR] Error reading DHT11 - humidity.");
   }
 
   const char* motionPayload = pirState == HIGH ? "1" : "0";
   mqttClient.publish(TOPIC_MOTION, motionPayload, true);
-  Serial.print("[CAM BIEN] Chuyen dong PIR: ");
-  Serial.println(pirState == HIGH ? "CO CHUYEN DONG" : "KHONG CO CHUYEN DONG");
+  Serial.println("Published: " + String(TOPIC_MOTION) + " -> " + String(motionPayload));
 
   char lightPayload[8];
   snprintf(lightPayload, sizeof(lightPayload), "%d", lightPercent);
   mqttClient.publish(TOPIC_LIGHT_LEVEL, lightPayload, true);
-  Serial.print("[CAM BIEN] Anh sang LDR: ");
-  Serial.print(lightPercent);
-  Serial.print("% (ADC=");
-  Serial.print(ldrRaw);
-  Serial.println(")");
+  Serial.println("Published: " + String(TOPIC_LIGHT_LEVEL) + " -> " + String(lightPayload));
 }
 
 // ==========================================================================================================
@@ -344,11 +360,10 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println();
-  Serial.println("============================================================");
-  Serial.println("TUYEN HOME - ESP32 SMART HOME");
-  Serial.println("MQTTS / TLS voi HiveMQ Cloud - Port 8883");
-  Serial.println("============================================================");
+  Serial.println("=== FIRMWARE STARTING ===");
+
+  pinMode(STATUS_LED_PIN, OUTPUT);
+  digitalWrite(STATUS_LED_PIN, LED_OFF); // Off initially
 
   pinMode(RELAY_LED_PIN, OUTPUT);
   applyOutputState(false);
@@ -374,15 +389,13 @@ void setup() {
 // ==========================================================================================================
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi lost - reconnecting...");
     connectWiFi();
   }
 
   if (!mqttClient.connected()) {
-    unsigned long now = millis();
-    if (now - lastReconnectAttemptMs >= MQTT_RECONNECT_INTERVAL_MS) {
-      lastReconnectAttemptMs = now;
-      reconnectMQTT();
-    }
+    Serial.println("MQTT lost - reconnecting...");
+    reconnectMQTT();
   } else {
     mqttClient.loop();
 

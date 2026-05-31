@@ -1,6 +1,7 @@
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -35,13 +36,22 @@ export async function registerForPushNotificationsAsync() {
     }
     
     try {
+      const projectId =
+        Constants?.expoConfig?.extra?.eas?.projectId ??
+        Constants?.easConfig?.projectId;
+
+      if (!projectId || projectId === 'your-project-id') {
+        console.warn('Expo Push Notifications: No valid EAS projectId found in app.json. Skipping push token registration.');
+        return null;
+      }
+
       // Get the token
       token = (await Notifications.getExpoPushTokenAsync({
-        projectId: "your-project-id" // In a real app you'd need EXPO_PUBLIC_PROJECT_ID, but since we're using a bare workflow or local it will work for dev
+        projectId
       })).data;
       console.log('Expo Push Token:', token);
     } catch (e) {
-      console.error(e);
+      console.warn('Failed to fetch Expo push token (push notifications will be disabled):', e.message || e);
     }
   } else {
     console.log('Must use physical device for Push Notifications');

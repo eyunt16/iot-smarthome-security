@@ -204,9 +204,20 @@ export function useMQTT() {
     clientRef.current = client;
 
     client.on('connect', () => {
+      if (client.disconnecting || !client.connected) {
+        return;
+      }
       setIsConnected(true);
       addLog('$SYS/broker', 'HiveMQ Cloud · MQTTS · TLS 1.3 · Port 8883', 'system');
-      client.subscribe([ROOM_TOPIC, 'home/motion'], { qos: 1 }, (error) => {
+      client.subscribe([
+        ROOM_TOPIC,
+        'home/motion',
+        'home/temperature',
+        'home/humidity',
+        'home/light',
+        'home/door/state',
+        'home/door/control'
+      ], { qos: 1 }, (error) => {
         if (error) {
           console.error('MQTT subscribe error:', error);
         }
@@ -227,6 +238,71 @@ export function useMQTT() {
             alertCount: prev.motion.alertCount + (isMotion ? 1 : 0),
           },
         }));
+        addLog(topic, payloadText, 'receive');
+        return;
+      }
+
+      if (topic === 'home/temperature') {
+        const val = parseFloat(payloadText);
+        if (!isNaN(val)) {
+          setSensorData((prev) => ({
+            ...prev,
+            temperature: {
+              current: val,
+              history: appendHistory(prev.temperature.history, val),
+            },
+          }));
+        }
+        addLog(topic, payloadText, 'receive');
+        return;
+      }
+
+      if (topic === 'home/humidity') {
+        const val = parseFloat(payloadText);
+        if (!isNaN(val)) {
+          setSensorData((prev) => ({
+            ...prev,
+            humidity: {
+              current: Math.round(val),
+              history: appendHistory(prev.humidity.history, Math.round(val)),
+            },
+          }));
+        }
+        addLog(topic, payloadText, 'receive');
+        return;
+      }
+
+      if (topic === 'home/light') {
+        const val = parseFloat(payloadText);
+        if (!isNaN(val)) {
+          const isLightOn = val === 1;
+          setDeviceStates((prev) => ({
+            ...prev,
+            light: { on: isLightOn, brightness: isLightOn ? 100 : 0 },
+          }));
+          setSensorData((prev) => ({
+            ...prev,
+            light: {
+              current: Math.round(val),
+              history: appendHistory(prev.light.history, Math.round(val)),
+            },
+          }));
+        }
+        addLog(topic, payloadText, 'receive');
+        return;
+      }
+
+      if (topic === 'home/door/state') {
+        const isUnlocked = payloadText === 'unlocked';
+        setDeviceStates((prev) => ({
+          ...prev,
+          light: { on: isUnlocked, brightness: isUnlocked ? 100 : 0 },
+        }));
+        addLog(topic, payloadText, 'receive');
+        return;
+      }
+
+      if (topic === 'home/door/control') {
         addLog(topic, payloadText, 'receive');
         return;
       }
@@ -319,22 +395,24 @@ export function useMQTT() {
   }, [updateLegacySensorSnapshot]);
 
   const toggleDevice = useCallback((device, value, extra = {}) => {
-    setDeviceStates((prev) => {
-      if (device === 'light') {
-        const brightness = extra.brightness ?? value;
-        addLog('home/device/light', brightness > 0 ? `${brightness}%` : 'OFF', 'publish');
-        return { ...prev, light: { on: brightness > 0, brightness } };
-      }
-
-      if (device === 'fan') {
-        const speed = extra.speed ?? value;
-        addLog('home/device/fan', speed > 0 ? `${speed}%` : 'OFF', 'publish');
-        return { ...prev, fan: { on: speed > 0, speed } };
-      }
-
-      return prev;
-    });
-  }, [addLog]);
+    if (device === 'light') {
+      const brightness = extra.brightness ?? value;
+      const stateText = brightness > 0 ? 'unlock' : 'lock';
+      publish('home/door/control', stateText, { qos: 1 });
+      setDeviceStates((prev) => ({
+        ...prev,
+        light: { on: brightness > 0, brightness }
+      }));
+    } else if (device === 'fan') {
+      const speed = extra.speed ?? value;
+      const stateText = speed > 0 ? 'ON' : 'OFF';
+      publish('home/device/fan', stateText, { qos: 1 });
+      setDeviceStates((prev) => ({
+        ...prev,
+        fan: { on: speed > 0, speed }
+      }));
+    }
+  }, [publish]);
 
   const activeEspRooms = ROOM_KEYS.filter((roomKey) => (
     Date.now() - (roomRealtimeRef.current[roomKey] || 0) <= REALTIME_STALE_MS

@@ -86,9 +86,9 @@ export default function Header({ activePage, isConnected }) {
               backgroundColor: isDark ? `${accent}14` : `${accent}0D`,
               color: accent,
             }}
-            title="Microcontroller Unit — ESP32"
+            title="Microcontroller Unit — ESP8266"
           >
-            ESP32
+            ESP8266
           </motion.div>
 
           {/* MQTTS badge */}

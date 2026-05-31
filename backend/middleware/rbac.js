@@ -115,7 +115,7 @@ function authorizeRoles(...allowedRoles) {
         `Access denied: locked account ${user._id || user.id || user.username || 'unknown'} attempted ${req.method} ${req.originalUrl}`,
       );
 
-      return res.status(423).json({
+      return res.status(403).json({
         message: 'Account is locked.',
       });
     }

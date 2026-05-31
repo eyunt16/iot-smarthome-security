@@ -15,7 +15,7 @@ import { api } from '../services/api';
 import * as Device from 'expo-device';
 import { canControlDevices } from '../utils/roleUtils';
 
-export default function DashboardScreen({ onLogout, user }) {
+export default function DashboardScreen({ onLogout, token, user }) {
   const { isDark, themeColors } = useTheme();
   const isAuthorizedToControl = canControlDevices(user);
   
@@ -45,7 +45,7 @@ export default function DashboardScreen({ onLogout, user }) {
 
   const fetchSensorData = async () => {
     try {
-      const response = await api.get('/data');
+      const response = await api.get('/data', token);
       if (response) {
         if (response.temperature !== undefined) setTemp(Number(response.temperature));
         if (response.humidity !== undefined) setHumidity(Number(response.humidity));
@@ -64,7 +64,7 @@ export default function DashboardScreen({ onLogout, user }) {
 
   const fetchCommandLogs = async () => {
     try {
-      const response = await api.get('/history');
+      const response = await api.get('/history', token);
       if (Array.isArray(response)) {
         // Map history to simple formatted logs
         const formatted = response.map((item, idx) => {
@@ -96,7 +96,7 @@ export default function DashboardScreen({ onLogout, user }) {
     }
     try {
       const nextBrightness = turnOn ? 100 : 0;
-      await api.post('/device/light/1', { brightness: nextBrightness });
+      await api.post('/device/light/1', { brightness: nextBrightness }, token);
       setLightOn(turnOn);
       setLightBrightness(nextBrightness);
       fetchCommandLogs();
@@ -111,7 +111,7 @@ export default function DashboardScreen({ onLogout, user }) {
       return;
     }
     try {
-      await api.post('/device/light/1', { brightness: value });
+      await api.post('/device/light/1', { brightness: value }, token);
       setLightBrightness(value);
       setLightOn(value > 0);
       fetchCommandLogs();
@@ -126,7 +126,7 @@ export default function DashboardScreen({ onLogout, user }) {
       return;
     }
     try {
-      await api.post('/device/fan', { speed });
+      await api.post('/device/fan', { speed }, token);
       setFanSpeed(speed);
       fetchCommandLogs();
     } catch (err) {

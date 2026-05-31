@@ -78,7 +78,7 @@ function PirHeroCard({ motionDetected, lastEvent, alertCount }) {
 
       <div className="relative flex items-start justify-between mb-5">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-white/40 mb-2">PIR Motion Sensor · ESP32</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-white/40 mb-2">PIR Motion Sensor · ESP8266</p>
           <h2 className="font-display text-3xl font-bold text-white">Intrusion Detection</h2>
         </div>
         <div className={`grid h-14 w-14 place-items-center rounded-2xl ${
@@ -1017,7 +1017,7 @@ export default function SecurityView({ sensorData, commandLog, publish }) {
     >
       {/* PIR Hero */}
       <section>
-        <SectionHeader icon={ShieldCheck} title="Intrusion Detection" subtitle="PIR passive infrared motion sensor · ESP32" />
+        <SectionHeader icon={ShieldCheck} title="Intrusion Detection" subtitle="PIR passive infrared motion sensor · ESP8266" />
         <PirHeroCard
           motionDetected={pir.current}
           lastEvent={pir.lastEvent}

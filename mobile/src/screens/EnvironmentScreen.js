@@ -34,7 +34,7 @@ function formatLux(value) {
   return `${Math.round(value)} lux`;
 }
 
-export default function EnvironmentScreen() {
+export default function EnvironmentScreen({ token }) {
   const { isDark, themeColors } = useTheme();
 
   // Snapshot states
@@ -60,7 +60,7 @@ export default function EnvironmentScreen() {
 
   const fetchLatestSensors = async () => {
     try {
-      const response = await api.get('/data');
+      const response = await api.get('/data', token);
       if (response) {
         const nextTemp = Number(response.temperature) || 27.4;
         const nextHumidity = Number(response.humidity) || 58;
@@ -80,7 +80,7 @@ export default function EnvironmentScreen() {
 
   const fetchHistoryData = async () => {
     try {
-      const response = await api.get('/history');
+      const response = await api.get('/history', token);
       if (Array.isArray(response) && response.length > 0) {
         // Parse historical sensor values
         const parsed = response.map((item, idx) => {

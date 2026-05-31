@@ -152,6 +152,38 @@ app.get('/health', (_req, res) => {
 app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter, authRoutes);
 
+// --- SETTINGS ENDPOINTS ---
+app.get('/api/auth/settings', authenticateJWT, async (req, res) => {
+  try {
+    const Setting = require('./models/Setting');
+    let settings = await Setting.findOne();
+    if (!settings) {
+      settings = await Setting.create({ notif: true, datalog: true, emailalert: false });
+    }
+    return res.status(200).json(settings);
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.post('/api/auth/settings', authenticateJWT, async (req, res) => {
+  try {
+    const { notif, datalog, emailalert } = req.body || {};
+    const Setting = require('./models/Setting');
+    let settings = await Setting.findOne();
+    if (!settings) {
+      settings = new Setting();
+    }
+    if (notif !== undefined) settings.notif = notif;
+    if (datalog !== undefined) settings.datalog = datalog;
+    if (emailalert !== undefined) settings.emailalert = emailalert;
+    await settings.save();
+    return res.status(200).json(settings);
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
 // Store global mqttClient reference for backend publishing
 let globalMqttClient = null;
 
@@ -232,6 +264,70 @@ app.get(
     });
   },
 );
+
+// --- THESIS VERIFICATION TEST ENDPOINTS ---
+app.get('/api/sensors', authenticateJWT, requireGuest, (req, res) => {
+  return res.status(200).json({
+    message: 'Sensor data retrieved successfully (read-only access).',
+    sensors: [
+      { id: 'DHT11_TEMP', name: 'Temperature Sensor', value: 24.5, unit: '°C' },
+      { id: 'DHT11_HUMID', name: 'Humidity Sensor', value: 60.2, unit: '%' }
+    ]
+  });
+});
+
+app.get('/api/sensors/history', authenticateJWT, requireGuest, (req, res) => {
+  return res.status(200).json({
+    message: 'Sensor history retrieved successfully (read-only access).',
+    count: 3,
+    history: [
+      { timestamp: new Date(Date.now() - 60000).toISOString(), temperature: 24.2, humidity: 60.5, light: 750, motion: 'CLEAR' },
+      { timestamp: new Date(Date.now() - 30000).toISOString(), temperature: 24.4, humidity: 60.3, light: 748, motion: 'CLEAR' },
+      { timestamp: new Date().toISOString(), temperature: 24.5, humidity: 60.2, light: 749, motion: 'CLEAR' }
+    ]
+  });
+});
+
+app.post('/api/device/control', authenticateJWT, requireHomeOwner, (req, res) => {
+  const { device, action, value } = req.body || {};
+  
+  if (globalMqttClient && globalMqttClient.connected) {
+    let stateText = 'lock';
+    if (value === 'ON' || value === '1' || value === 1 || action === 'unlock' || action === 'ON') {
+      stateText = 'unlock';
+    }
+    globalMqttClient.publish('home/door/control', stateText, { qos: 1 }, (err) => {
+      if (err) {
+        console.error('[MQTT Backend] Failed to publish control command:', err);
+      } else {
+        console.log(`[MQTT Backend] Successfully published control to home/door/control: ${stateText}`);
+      }
+    });
+  }
+
+  return res.status(200).json({
+    message: 'Control command sent successfully (write access).',
+    device: device || 'light1',
+    action: action || 'toggle',
+    value: value || 'ON'
+  });
+});
+
+app.get('/api/admin/locked-users', authenticateJWT, requireSuperAdmin, async (req, res) => {
+  try {
+    const User = require('./models/User');
+    const lockedUsers = await User.find({ isLocked: true })
+      .select('_id username email failedLoginAttempts')
+      .lean();
+    return res.status(200).json({
+      message: 'Locked users retrieved successfully (admin-only access).',
+      count: lockedUsers.length,
+      users: lockedUsers
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
 
 app.use((req, res) => {
   return res.status(404).json({

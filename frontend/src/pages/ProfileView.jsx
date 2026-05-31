@@ -196,7 +196,7 @@ function SystemInfo() {
   const rows = [
     { label: 'Project Name',    value: 'Tuyen Home — IoT Smart Home' },
     { label: 'Focus',           value: 'Security & Privacy' },
-    { label: 'Microcontroller', value: 'ESP32' },
+    { label: 'Microcontroller', value: 'ESP8266' },
     { label: 'Sensors',         value: 'DHT11 · PIR HC-SR501' },
     { label: 'Broker',          value: 'HiveMQ Cloud (MQTTS)' },
     { label: 'Frontend',        value: 'React 19 · Tailwind CSS v4' },

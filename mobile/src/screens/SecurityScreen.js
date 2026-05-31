@@ -13,7 +13,7 @@ import {
 import { useTheme } from '../theme/ThemeContext';
 import { api } from '../services/api';
 
-export default function SecurityScreen({ user }) {
+export default function SecurityScreen({ token, user }) {
   const { isDark, themeColors } = useTheme();
   const isAdmin = user?.role === 'admin' || user?.role === 'SuperAdmin';
   
@@ -38,7 +38,7 @@ export default function SecurityScreen({ user }) {
     setLoadingAdminData(true);
     try {
       // 1. Fetch Users
-      const usersResponse = await api.get('/auth/users');
+      const usersResponse = await api.get('/auth/users', token);
       if (usersResponse && Array.isArray(usersResponse.users)) {
         setUsersList(usersResponse.users);
       } else if (usersResponse && Array.isArray(usersResponse)) {
@@ -46,7 +46,7 @@ export default function SecurityScreen({ user }) {
       }
 
       // 2. Fetch Security Logs
-      const logsResponse = await api.get('/auth/logs');
+      const logsResponse = await api.get('/auth/logs', token);
       if (logsResponse && Array.isArray(logsResponse.logs)) {
         setSecurityLogs(logsResponse.logs.slice(0, 10)); // Take latest 10 logs
       } else if (logsResponse && Array.isArray(logsResponse)) {
@@ -78,7 +78,7 @@ export default function SecurityScreen({ user }) {
 
     setUnlocking(true);
     try {
-      const response = await api.post('/auth/door/unlock', { pin: enteredPin });
+      const response = await api.post('/auth/door/unlock', { pin: enteredPin }, token);
       setDoorLocked(false);
       setShowPinModal(false);
       Alert.alert('Success', response.message || 'Door successfully unlocked!');
@@ -98,7 +98,7 @@ export default function SecurityScreen({ user }) {
         device: 'door',
         action: 'lock',
         value: 'lock'
-      });
+      }, token);
       setDoorLocked(true);
       Alert.alert('Locked', 'Main Entrance successfully locked.');
       if (isAdmin) fetchAdminData();
@@ -119,7 +119,7 @@ export default function SecurityScreen({ user }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await api.delete('/auth/logs');
+              await api.delete('/auth/logs', token);
               Alert.alert('Success', 'Security log trail successfully cleared.');
               fetchAdminData();
             } catch (err) {

@@ -137,7 +137,7 @@ function DashboardSkeleton() {
           className="font-display text-xl font-bold transition-colors duration-300"
           style={{ color: colors.text }}
         >
-          Connecting to ESP32…
+          Connecting to ESP8266…
         </p>
         <p
           className="text-sm transition-colors duration-300"
@@ -443,7 +443,7 @@ function SystemStrip({ isConnected }) {
   const items = [
     { icon: Radio,        label: 'Broker',   value: 'HiveMQ Cloud',    ok: isConnected },
     { icon: Lock,         label: 'Protocol', value: 'MQTTS / TLS 1.3', ok: true        },
-    { icon: Cpu,          label: 'MCU',      value: 'ESP32',           ok: true        },
+    { icon: Cpu,          label: 'MCU',      value: 'ESP8266',           ok: true        },
     { icon: CheckCircle2, label: 'Uptime',   value: '99.2 %',          ok: true        },
   ];
 
@@ -1150,7 +1150,7 @@ export default function Dashboard({
         <SectionHeader
           icon={Zap}
           title="Active Devices"
-          subtitle={canControlDevices ? 'Relay-controlled actuators via ESP32' : 'Customer accounts can monitor device status'}
+          subtitle={canControlDevices ? 'Relay-controlled actuators via ESP8266' : 'Customer accounts can monitor device status'}
         />
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1fr_1.1fr]">
           <LightControl

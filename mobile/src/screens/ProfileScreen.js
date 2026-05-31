@@ -16,7 +16,7 @@ import * as Device from 'expo-device';
 import { useTheme } from '../theme/ThemeContext';
 import { api } from '../services/api';
 
-export default function ProfileScreen({ onLogout, user }) {
+export default function ProfileScreen({ onLogout, token, user }) {
   const { isDark, toggleTheme, themeColors } = useTheme();
 
   // Change Password form states
@@ -50,7 +50,7 @@ export default function ProfileScreen({ onLogout, user }) {
       const response = await api.post('/auth/change-password', {
         currentPassword,
         newPassword
-      });
+      }, token);
       Alert.alert('Success', response.message || 'Password changed successfully!');
       setCurrentPassword('');
       setNewPassword('');
@@ -61,7 +61,7 @@ export default function ProfileScreen({ onLogout, user }) {
         const response = await api.post('/auth/change-password', {
           currentPassword,
           newPassword
-        }, { method: 'PUT' });
+        }, token);
         Alert.alert('Success', response.message || 'Password changed successfully!');
         setCurrentPassword('');
         setNewPassword('');

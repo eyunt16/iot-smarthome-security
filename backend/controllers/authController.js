@@ -130,7 +130,7 @@ async function login(req, res) {
         ipAddress: clientIp,
       });
 
-      return res.status(423).json({
+      return res.status(403).json({
         message: 'Account is locked. Please contact an administrator.',
       });
     }
@@ -184,7 +184,7 @@ async function login(req, res) {
         }
       }
 
-      return res.status(401).json({
+      return res.status(user.isLocked ? 403 : 401).json({
         message: user.isLocked
           ? 'Account locked after too many failed login attempts.'
           : 'Invalid credentials.',
