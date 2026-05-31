@@ -1,6 +1,6 @@
 # IoT Smart Home Security Platform
 
-An IoT Smart Home project focused on real-time monitoring, device control, and security hardening. The current workspace combines a React dashboard, a Flask + SQLite operational backend for MQTT-driven telemetry, ESP32/ESP8266 firmware, and a parallel Node.js security API track that introduces JWT authentication, role-based access control, brute-force protection, account lock/unlock flows, audit logging, and email alerts. The project also documents secure MQTT communication over MQTTS/TLS for cloud-broker deployments.
+An IoT Smart Home project focused on real-time monitoring, device control, and security hardening. The platform features a React dashboard fully integrated with a production-grade Node.js + Express security backend. It implements JSON Web Tokens (JWT) authentication, role-based access control (RBAC), brute-force login protection, account lockout/unlock workflows, security audit logging, and automated email alerts, backed by MongoDB. Secure MQTT communication over MQTTS/TLS connects both the Express server and alternative Python/Flask runtime to HiveMQ Cloud.
 
 ## 🌍 Live Demo & Deployment Notes
 
@@ -183,12 +183,35 @@ The following environment variables are configured for secure cross-origin commu
 #### Frontend (Vercel)
 - `VITE_API_BASE_URL`: Mapped to the production Render endpoint for API orchestration.
 
-### Run the Current Web App from Scratch
+### Run the Web App from Scratch
 
-This is the path that matches the current React dashboard integration in the workspace.
+To launch the primary platform, start the Node.js Security Backend and the React Frontend.
 
-#### 1. Start the Flask backend
+#### 1. Start the Node.js Security Backend (Express + MongoDB)
+The primary backend implements all JWT authentication, RBAC, brute-force mitigation, and audit logging.
 
+Create a `backend/.env` file with the correct database and port details (default 5000). Then run:
+```powershell
+cd backend
+npm install
+npm run seed:superadmin   # Automatically seeds the default SuperAdmin account
+npm start
+```
+The Node.js backend runs on `http://127.0.0.1:5000` and connects to MongoDB Atlas and HiveMQ Cloud over MQTTS.
+
+#### 2. Start the React Frontend
+In a second terminal:
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+The React frontend runs on `http://127.0.0.1:5173`. Vite automatically proxies API calls `/api` to the backend on `http://127.0.0.1:5000`.
+
+---
+
+### Alternative: Run the Legacy Python Runtime (Flask + SQLite)
+If you want to run the secondary, legacy operational telemetry backend:
 ```powershell
 cd backend
 python -m venv venv
@@ -196,40 +219,58 @@ python -m venv venv
 pip install -r requirements.txt
 python app.py
 ```
+*Note: The Flask runtime operates on port 5000 and is for local operational SQLite/MQTT logging, but does not support the full Node.js security authentication suite.*
 
-The Flask backend runs on `http://127.0.0.1:5000`.
+---
 
-#### 2. Start the React frontend
+## 🔒 Comprehensive Security Verification Suite
 
-Open a second terminal:
+The platform includes a dedicated, automated security assertion script at `backend/tests/run_verification_tests.js`. This suite programmatically simulates threats and asserts the correct enforcement of all platform security mechanisms against a running backend API.
 
+### What is Verified
+- **TEST A: Brute-Force Lockout**: Simulates sequential failed login storms. Asserts that the account is locked exactly at attempt $N = 5$, rejects subsequent logins (even with correct credentials) with HTTP `403 Forbidden`, and verifies direct database integrity (`isLocked: true`).
+- **TEST B: Role-Based Access Control (RBAC)**: Simulates access matrix enforcement across `Guest`, `HomeOwner`, and `SuperAdmin` roles for read-only (`GET /api/sensors`), write (`POST /api/device/control`), and administrative (`GET /api/admin/locked-users`) endpoints.
+- **TEST C: IP-Based Authentication Rate Limiter**: Floods the authentication endpoints. Asserts that the IP rate limiter blocks excessive requests with HTTP `429 Too Many Requests` at the $11$-th attempt and extracts the `Retry-After` header.
+- **TEST D: JWT Expiry Validation**: Generates a cryptographically valid token signed with the proper secret but with a past expiration claim. Asserts that the backend rejects the expired token with HTTP `401 Unauthorized` and the specific reason payload.
+
+### How to Run
+
+1. Make sure your primary Node.js backend is running (`npm start` inside `backend` folder).
+2. Open a terminal and run the test suite:
+
+#### Standard Mode (Verbose details)
+Prints every request status, response message, database document states, and matrix tables:
 ```powershell
-cd frontend
-npm install
-npm run dev
+cd backend/tests
+node run_verification_tests.js
 ```
 
-The React app runs on `http://127.0.0.1:5173`.
-
-### Optional: Run the Node.js Security API Track
-
-Use this if you want to test the JWT/RBAC/brute-force/MongoDB backend separately from the Flask runtime.
-
-#### Option A: local MongoDB
-
+#### Compact Mode (Summary-only)
+Suppresses verbose output to display a clean, highly condensed **Executive Summary Matrix** designed to fit perfectly in a single screenshot or thesis figure:
 ```powershell
-cd backend
-npm install
-npm run seed:superadmin
-npm start
+cd backend/tests
+node run_verification_tests.js --summary
 ```
 
-#### Option B: Docker Compose
+**Compact Mode Console Output Example:**
+```text
+================================================================================
+               SECURITY VERIFICATION SUITE — EXECUTIVE SUMMARY
+================================================================================
+ TEST A: Brute-Force Lockout Mitigation  .......................... [ PASS ]
+ TEST B: Role-Based Access Control (RBAC)  ........................ [ PASS ]
+     ├─ Read-only (Guest/HomeOwner/SuperAdmin)  ................... [ PASS ]
+     ├─ Write control (HomeOwner/Admin allowed, Guest blocked) .... [ PASS ]
+     └─ Administrative access (SuperAdmin only)  .................. [ PASS ]
+ TEST C: IP-based Authentication Rate Limiter  .................... [ PASS ]
+ TEST D: JSON Web Token (JWT) Expiry Validation  .................. [ PASS ]
+================================================================================
 
-```powershell
-cd backend
-docker compose up --build
+[SUCCESS] All verification results successfully logged and saved to:
+--> C:\Prethesis\iot-smarthome-security\test_results.txt
 ```
+
+All detailed verification outputs are always written to the persistent log file at [test_results.txt](file:///C:/Prethesis/iot-smarthome-security/test_results.txt).
 
 ### Optional Helper Scripts
 
@@ -265,8 +306,10 @@ iot-smarthome-security/
 `-- scripts/                # Windows setup and run helpers
 ```
 
-## Notes on Current State
+## 🛡️ Current Platform Security Hardening Status
 
-- The React app is now integrated with the Node.js Security API for production authentication and data management, while retaining local compatibility with the Flask runtime.
-- The Node.js security API is present and more security-focused, but it is a parallel backend track rather than the one the current frontend is fully wired to.
-- MQTTS/TLS is implemented in the Python MQTT service for HiveMQ Cloud, while some frontend mock/demo code still references public broker simulation paths for UI development.
+- **JWT Auth & Session Lifecycle**: Integrated securely on the React client with Axios interception. Logging out automatically invalidates sessions on `401` responses.
+- **RBAC Matrix Enforcement**: All operational routes are protected on the Express API based on roles (`Guest`, `HomeOwner`, `SuperAdmin`), preventing role bypass or privilege escalation.
+- **IP Ban & Bruteforce Lockout**: Accounts automatically lock after 5 incorrect password attempts. Extreme traffic triggers temporary IP rate bans, mitigating distributed attacks.
+- **Audited Events**: Important access triggers, failed authentications, door unlocks, and administrative actions are logged in MongoDB via an audit log trail.
+- **MQTTS Secure Broker Pipeline**: Both the Express backend and Flask runtime communicate with the HiveMQ Cloud MQTTS broker on port 8883 over TLS, keeping device publications secure.

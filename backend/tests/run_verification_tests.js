@@ -22,12 +22,41 @@ const jwt = require('jsonwebtoken');
 const API_BASE = 'http://localhost:5000';
 const RESULTS_FILE = path.resolve(__dirname, '../../test_results.txt');
 
+// Check if running in compact summary-only mode to fit in a single screenshot
+const isSummaryOnly = process.argv.includes('--summary') || process.argv.includes('-s');
+
+// ANSI Color Escape Sequences for beautiful terminal outputs (ASCII fallback safe for Windows CMD/PowerShell)
+const colors = {
+  green: (text) => `\x1b[32m${text}\x1b[0m`,
+  red: (text) => `\x1b[31m${text}\x1b[0m`,
+  yellow: (text) => `\x1b[33m${text}\x1b[0m`,
+  cyan: (text) => `\x1b[36m${text}\x1b[0m`,
+  bold: (text) => `\x1b[1m${text}\x1b[0m`,
+};
+
+const PASS = colors.green('[v] PASS');
+const FAIL = colors.red('[x] FAIL');
+const ERROR = colors.red('[!] ERROR');
+const CHECK = colors.green('[v]');
+
 // Keep all console output in a log buffer to write to file
 let logBuffer = '';
 
+function stripAnsi(text) {
+  if (typeof text !== 'string') return text;
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
 function log(message) {
+  if (!isSummaryOnly) {
+    console.log(message);
+  }
+  logBuffer += stripAnsi(message) + '\n';
+}
+
+function logSummary(message) {
   console.log(message);
-  logBuffer += message + '\n';
+  logBuffer += stripAnsi(message) + '\n';
 }
 
 // Helper to generate a random IP address to isolate rate limit test scopes
@@ -100,6 +129,13 @@ const UserSchema = new mongoose.Schema({
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
 async function runSuite() {
+  let testAPassed = false;
+  let testBReadPassed = false;
+  let testBWritePassed = false;
+  let testBAdminPassed = false;
+  let testCPassed = false;
+  let testDPassed = false;
+
   log('================================================================================');
   log('              COMPREHENSIVE SECURITY VERIFICATION TEST SUITE                    ');
   log('================================================================================');
@@ -117,9 +153,9 @@ async function runSuite() {
   
   try {
     await mongoose.connect(mongoUri);
-    log('✅ Successfully connected to MongoDB Atlas database!\n');
+    log(`${PASS} Successfully connected to MongoDB Atlas database!\n`);
   } catch (err) {
-    log(`❌ Failed to connect to MongoDB: ${err.message}`);
+    log(`${ERROR} Failed to connect to MongoDB: ${err.message}`);
     process.exit(1);
   }
 
@@ -145,6 +181,10 @@ async function runSuite() {
   const testAIp = generateRandomIP();
   log(`[TEST A] Isolated IP allocated for this scope: ${testAIp}\n`);
 
+  let lockoutCorrect = false;
+  let postLockoutCorrect = false;
+  let dbLockoutCorrect = false;
+
   try {
     // 1. Database Cleanup
     log(`[TEST A] Cleaning up existing user "${testUser.username}" from database...`);
@@ -161,11 +201,11 @@ async function runSuite() {
     }, null, testAIp);
 
     if (regRes.status !== 201) {
-      log(`❌ [TEST A] Failed to register user. Status: ${regRes.status}`);
+      log(`${FAIL} [TEST A] Failed to register user. Status: ${regRes.status}`);
       log(JSON.stringify(regRes.body));
       throw new Error('Registration failed');
     }
-    log('✅ [TEST A] Registration successful (201 Created).\n');
+    log(`${PASS} [TEST A] Registration successful (201 Created).\n`);
 
     // 3. Send N=5 wrong password attempts
     const N = 5;
@@ -180,15 +220,16 @@ async function runSuite() {
       
       if (i === N) {
         if (loginRes.status === 403) {
-          log('✅ [TEST A] Assertion Passed: On attempt N (lockout threshold), received expected HTTP 403 Forbidden!');
+          log(`${PASS} [TEST A] Assertion Passed: On attempt N (lockout threshold), received expected HTTP 403 Forbidden!`);
+          lockoutCorrect = true;
         } else {
-          log(`❌ [TEST A] Assertion Failed: On attempt N, expected HTTP 403, received HTTP ${loginRes.status}`);
+          log(`${FAIL} [TEST A] Assertion Failed: On attempt N, expected HTTP 403, received HTTP ${loginRes.status}`);
         }
       } else {
         if (loginRes.status === 401) {
-          log(`✓ Attempt #${i} correctly returned HTTP 401 Unauthorized.`);
+          log(`${CHECK} Attempt #${i} correctly returned HTTP 401 Unauthorized.`);
         } else {
-          log(`❌ [TEST A] Attempt #${i} returned unexpected status HTTP ${loginRes.status}`);
+          log(`${FAIL} [TEST A] Attempt #${i} returned unexpected status HTTP ${loginRes.status}`);
         }
       }
       // Small pause to prevent rate limiting interfering
@@ -204,9 +245,10 @@ async function runSuite() {
 
     log(`Attempt with CORRECT password: Status Received = ${correctPwRes.status} | Response Message = "${correctPwRes.body?.message || ''}"`);
     if (correctPwRes.status === 403) {
-      log('✅ [TEST A] Assertion Passed: Correct password attempt post-lockout returns HTTP 403 Forbidden!');
+      log(`${PASS} [TEST A] Assertion Passed: Correct password attempt post-lockout returns HTTP 403 Forbidden!`);
+      postLockoutCorrect = true;
     } else {
-      log(`❌ [TEST A] Assertion Failed: Post-lockout correct password attempt expected HTTP 403, received HTTP ${correctPwRes.status}`);
+      log(`${FAIL} [TEST A] Assertion Failed: Post-lockout correct password attempt expected HTTP 403, received HTTP ${correctPwRes.status}`);
     }
 
     // 5. Verify MongoDB isLocked=true
@@ -216,16 +258,19 @@ async function runSuite() {
     if (dbUser) {
       log(`Database Document -> username: "${dbUser.username}" | failedLoginAttempts: ${dbUser.failedLoginAttempts} | isLocked: ${dbUser.isLocked}`);
       if (dbUser.isLocked === true) {
-        log('✅ [TEST A] Assertion Passed: User document shows isLocked = true in MongoDB!');
+        log(`${PASS} [TEST A] Assertion Passed: User document shows isLocked = true in MongoDB!`);
+        dbLockoutCorrect = true;
       } else {
-        log('❌ [TEST A] Assertion Failed: User document isLocked = false in MongoDB!');
+        log(`${FAIL} [TEST A] Assertion Failed: User document isLocked = false in MongoDB!`);
       }
     } else {
-      log('❌ [TEST A] User document not found in MongoDB!');
+      log(`${FAIL} [TEST A] User document not found in MongoDB!`);
     }
 
+    testAPassed = lockoutCorrect && postLockoutCorrect && dbLockoutCorrect;
+
   } catch (error) {
-    log(`❌ [TEST A] Critical Error: ${error.message}`);
+    log(`${ERROR} [TEST A] Critical Error: ${error.message}`);
   }
   log('--------------------------------------------------------------------------------\n');
 
@@ -283,9 +328,9 @@ async function runSuite() {
 
       if (loginRes.status === 200 && loginRes.body?.token) {
         tokens[role] = loginRes.body.token;
-        log(`✓ Token acquired for role: ${role}`);
+        log(`${CHECK} Token acquired for role: ${role}`);
       } else {
-        log(`❌ Failed to acquire token for role ${role}. Status: ${loginRes.status}`);
+        log(`${FAIL} Failed to acquire token for role ${role}. Status: ${loginRes.status}`);
         throw new Error(`Login failed for ${role}`);
       }
     }
@@ -322,24 +367,28 @@ async function runSuite() {
     const sensorsOk = rbacResults['GET /api/sensors (read-only)']['Guest'] === 200 &&
                       rbacResults['GET /api/sensors (read-only)']['HomeOwner'] === 200 &&
                       rbacResults['GET /api/sensors (read-only)']['SuperAdmin'] === 200;
-    log(`✓ Read-only constraint: GET /api/sensors accessible to Guest/HomeOwner/Admin: ${sensorsOk ? '✅ PASS (200 OK)' : '❌ FAIL'}`);
+    log(`${CHECK} Read-only constraint: GET /api/sensors accessible to Guest/HomeOwner/Admin: ${sensorsOk ? colors.green('PASS (200 OK)') : colors.red('FAIL')}`);
 
     // Validate POST /api/device/control (write) -> should be 403 for Guest, 200 for HomeOwner & SuperAdmin
     const controlGuestRejected = rbacResults['POST /api/device/control (write)']['Guest'] === 403;
     const controlHomeOwnerAllowed = rbacResults['POST /api/device/control (write)']['HomeOwner'] === 200;
     const controlAdminAllowed = rbacResults['POST /api/device/control (write)']['SuperAdmin'] === 200;
     const controlOk = controlGuestRejected && controlHomeOwnerAllowed && controlAdminAllowed;
-    log(`✓ Write constraint: POST /api/device/control rejected for Guest (403), allowed for HomeOwner/Admin (200): ${controlOk ? '✅ PASS' : '❌ FAIL'}`);
+    log(`${CHECK} Write constraint: POST /api/device/control rejected for Guest (403), allowed for HomeOwner/Admin (200): ${controlOk ? colors.green('PASS') : colors.red('FAIL')}`);
 
     // Validate GET /api/admin/locked-users (admin only) -> should be 403 for Guest & HomeOwner, 200 for SuperAdmin
     const adminGuestRejected = rbacResults['GET /api/admin/locked-users (admin only)']['Guest'] === 403;
     const adminHomeOwnerRejected = rbacResults['GET /api/admin/locked-users (admin only)']['HomeOwner'] === 403;
     const adminAdminAllowed = rbacResults['GET /api/admin/locked-users (admin only)']['SuperAdmin'] === 200;
     const adminOk = adminGuestRejected && adminHomeOwnerRejected && adminAdminAllowed;
-    log(`✓ Admin constraint: GET /api/admin/locked-users rejected for Guest/HomeOwner (403), allowed only for Admin (200): ${adminOk ? '✅ PASS' : '❌ FAIL'}`);
+    log(`${CHECK} Admin constraint: GET /api/admin/locked-users rejected for Guest/HomeOwner (403), allowed only for Admin (200): ${adminOk ? colors.green('PASS') : colors.red('FAIL')}`);
+
+    testBReadPassed = sensorsOk;
+    testBWritePassed = controlOk;
+    testBAdminPassed = adminOk;
 
   } catch (error) {
-    log(`❌ [TEST B] Critical Error: ${error.message}`);
+    log(`${ERROR} [TEST B] Critical Error: ${error.message}`);
   }
   log('--------------------------------------------------------------------------------\n');
 
@@ -384,15 +433,16 @@ async function runSuite() {
 
     log('\n[TEST C] Rate Limiter Analysis:');
     if (rateLimitTriggeredAt) {
-      log(`✅ [TEST C] Rate limit triggered at request #${rateLimitTriggeredAt} (Expected: #11 since AUTH_RATE_LIMIT_MAX = 10)`);
-      log(`✅ [TEST C] Received Retry-After header: ${retryAfterHeader} seconds`);
-      log('✅ [TEST C] Assertion Passed: API rate limiter successfully mitigated rapid brute force attempts.');
+      log(`${PASS} [TEST C] Rate limit triggered at request #${rateLimitTriggeredAt} (Expected: #11 since AUTH_RATE_LIMIT_MAX = 10)`);
+      log(`${PASS} [TEST C] Received Retry-After header: ${retryAfterHeader} seconds`);
+      log(`${PASS} [TEST C] Assertion Passed: API rate limiter successfully mitigated rapid brute force attempts.`);
+      testCPassed = true;
     } else {
-      log('❌ [TEST C] Assertion Failed: Rate limiter was not triggered! HTTP 429 was never received.');
+      log(`${FAIL} [TEST C] Assertion Failed: Rate limiter was not triggered! HTTP 429 was never received.`);
     }
 
   } catch (error) {
-    log(`❌ [TEST C] Critical Error: ${error.message}`);
+    log(`${ERROR} [TEST C] Critical Error: ${error.message}`);
   }
   log('--------------------------------------------------------------------------------\n');
 
@@ -445,29 +495,42 @@ async function runSuite() {
 
     if (res.status === 401) {
       if (res.body?.message === 'Authentication token has expired.') {
-        log('✅ [TEST D] Assertion Passed: Server correctly returned HTTP 401 and custom "Authentication token has expired." message!');
+        log(`${PASS} [TEST D] Assertion Passed: Server correctly returned HTTP 401 and custom "Authentication token has expired." message!`);
+        testDPassed = true;
       } else {
-        log(`❌ [TEST D] Status was 401, but message was unexpected: "${res.body?.message || 'N/A'}"`);
+        log(`${FAIL} [TEST D] Status was 401, but message was unexpected: "${res.body?.message || 'N/A'}"`);
       }
     } else {
-      log(`❌ [TEST D] Assertion Failed: Expected HTTP 401 Unauthorized, received HTTP ${res.status}`);
+      log(`${FAIL} [TEST D] Assertion Failed: Expected HTTP 401 Unauthorized, received HTTP ${res.status}`);
     }
 
   } catch (error) {
-    log(`❌ [TEST D] Critical Error: ${error.message}`);
+    log(`${ERROR} [TEST D] Critical Error: ${error.message}`);
   }
   log('--------------------------------------------------------------------------------\n');
 
   // ============================================================================
   // FINALIZE & EXPORT RESULTS
   // ============================================================================
+  logSummary('\n================================================================================');
+  logSummary('               SECURITY VERIFICATION SUITE — EXECUTIVE SUMMARY');
+  logSummary('================================================================================');
+  logSummary(` TEST A: Brute-Force Lockout Mitigation  .......................... ${testAPassed ? colors.green('[ PASS ]') : colors.red('[ FAIL ]')}`);
+  logSummary(` TEST B: Role-Based Access Control (RBAC)  ........................ ${ (testBReadPassed && testBWritePassed && testBAdminPassed) ? colors.green('[ PASS ]') : colors.red('[ FAIL ]')}`);
+  logSummary(`     ├─ Read-only (Guest/HomeOwner/SuperAdmin)  ................... ${testBReadPassed ? colors.green('[ PASS ]') : colors.red('[ FAIL ]')}`);
+  logSummary(`     ├─ Write control (HomeOwner/Admin allowed, Guest blocked) .... ${testBWritePassed ? colors.green('[ PASS ]') : colors.red('[ FAIL ]')}`);
+  logSummary(`     └─ Administrative access (SuperAdmin only)  .................. ${testBAdminPassed ? colors.green('[ PASS ]') : colors.red('[ FAIL ]')}`);
+  logSummary(` TEST C: IP-based Authentication Rate Limiter  .................... ${testCPassed ? colors.green('[ PASS ]') : colors.red('[ FAIL ]')}`);
+  logSummary(` TEST D: JSON Web Token (JWT) Expiry Validation  .................. ${testDPassed ? colors.green('[ PASS ]') : colors.red('[ FAIL ]')}`);
+  logSummary('================================================================================\n');
+
   log('================================================================================');
   log('                         END OF SECURITY TEST SUITE                             ');
   log('================================================================================');
 
   try {
     fs.writeFileSync(RESULTS_FILE, logBuffer, 'utf8');
-    console.log(`\n[SUCCESS] All verification results successfully logged and saved to:\n--> ${RESULTS_FILE}\n`);
+    logSummary(`[SUCCESS] All verification results successfully logged and saved to:\n--> ${RESULTS_FILE}\n`);
   } catch (err) {
     console.error(`[ERROR] Failed to write results file: ${err.message}`);
   }
